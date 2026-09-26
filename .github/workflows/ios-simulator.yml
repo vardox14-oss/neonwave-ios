@@ -95,7 +95,8 @@ jobs:
           SIMULATOR_ID: ${{ steps.device.outputs.udid }}
         run: |
           set -euo pipefail
-          xcrun simctl bootstatus "$SIMULATOR_ID" -b
+          xcrun simctl boot "$SIMULATOR_ID" 2>/dev/null || true
+          sleep 5
           xcrun simctl install "$SIMULATOR_ID" ios/DerivedData/Build/Products/Debug-iphonesimulator/NeonWave.app
           xcrun simctl launch --terminate-running-process "$SIMULATOR_ID" app.neonwave.ios
           sleep 5
