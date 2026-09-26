@@ -96,12 +96,28 @@ enum ArtistDiscoveryService {
         let data: [Item]?
     }
 
+    static func featured() async -> [ArtistChoice] {
+        guard AppConfiguration.apiURL != nil else {
+            return MusicTasteStore.featuredNames.map { ArtistChoice(name: $0) }
+        }
+        let response: ArtistResponse? = try? await APIClient().call("api/spotify/artists/defaults")
+        guard let items = response?.items.filter({ !$0.spotifyId.isEmpty && $0.source == "spotify" }), !items.isEmpty else {
+            return MusicTasteStore.featuredNames.map { ArtistChoice(name: $0) }
+        }
+        let byName = Dictionary(items.map { ($0.name.lowercased(), $0) }, uniquingKeysWith: { first, _ in first })
+        return MusicTasteStore.featuredNames.compactMap { byName[$0.lowercased()] }
+    }
+
     static func search(_ query: String) async -> [ArtistChoice] {
         let value = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard value.count >= 2 else { return [] }
-        if AppConfiguration.apiURL != nil,
-           let response: ArtistResponse = try? await APIClient().call("api/spotify/search-artists", queryItems: [.init(name: "q", value: value)]),
-           !response.items.isEmpty { return response.items }
+        if AppConfiguration.apiURL != nil {
+            let response: ArtistResponse? = try? await APIClient().call(
+                "api/spotify/search-artists",
+                queryItems: [.init(name: "q", value: value)]
+            )
+            return response?.items.filter { !$0.spotifyId.isEmpty && $0.source == "spotify" } ?? []
+        }
         guard var components = URLComponents(string: "https://api.deezer.com/search/artist") else { return [] }
         components.queryItems = [.init(name: "q", value: value), .init(name: "limit", value: "8")]
         guard let url = components.url,
@@ -119,6 +135,7 @@ struct TasteOnboardingView: View {
     @State private var genres: [String] = []
     @State private var artists: [ArtistChoice] = []
     @State private var suggestions: [ArtistChoice] = []
+    @State private var featuredArtists: [ArtistChoice] = []
     @State private var query = ""
     @State private var searching = false
     @State private var searchTask: Task<Void, Never>?
@@ -148,6 +165,7 @@ struct TasteOnboardingView: View {
             if genres.isEmpty { genres = taste.preferences.genres; artists = taste.preferences.artists }
             if suggestions.isEmpty { suggestions = MusicTasteStore.featuredNames.map { ArtistChoice(name: $0) } }
         }
+        .task { await loadFeaturedArtists() }
         .alert("NeonWave", isPresented: Binding(get: { taste.error != nil }, set: { if !$0 { taste.error = nil } })) { Button("D’accord", role: .cancel) { taste.error = nil } } message: { Text(taste.error ?? "") }
     }
 
@@ -188,9 +206,17 @@ struct TasteOnboardingView: View {
             }.padding(15).background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 18))
             .onChange(of: query) { _, value in search(value) }
             ScrollView {
-                LazyVGrid(columns: [.init(.flexible()), .init(.flexible()), .init(.flexible())], spacing: 18) {
-                    ForEach(suggestions) { artist in artistCard(artist) }
-                }.padding(.vertical, 6)
+                if suggestions.isEmpty && !searching && query.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 {
+                    VStack(spacing: 10) {
+                        Image(systemName: "music.mic").font(.title2).foregroundStyle(NW.blue)
+                        Text("Aucun profil Spotify précis").font(.subheadline.bold())
+                        Text("Essayez le nom complet de l’artiste.").font(.caption).foregroundStyle(.white.opacity(0.55))
+                    }.frame(maxWidth: .infinity).padding(.top, 40)
+                } else {
+                    LazyVGrid(columns: [.init(.flexible()), .init(.flexible()), .init(.flexible())], spacing: 18) {
+                        ForEach(suggestions) { artist in artistCard(artist) }
+                    }.padding(.vertical, 6)
+                }
             }.scrollIndicators(.hidden)
             HStack {
                 Button { withAnimation(.spring()) { step = 0 } } label: { Image(systemName: "chevron.left").frame(width: 54, height: 54).background(.white.opacity(0.08), in: Circle()) }
@@ -209,13 +235,29 @@ struct TasteOnboardingView: View {
             VStack(spacing: 9) {
                 ZStack {
                     Circle().fill(LinearGradient(colors: NW.colors[artist.colorIndex], startPoint: .topLeading, endPoint: .bottomTrailing))
-                    if let url = URL(string: artist.imageUrl), !artist.imageUrl.isEmpty { AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { initials(artist.name) }.clipShape(Circle()) }
-                    else { initials(artist.name) }
-                    if selected { Circle().fill(NW.blue.opacity(0.78)); Image(systemName: "checkmark").font(.title2.bold()) }
-                }.frame(height: 92)
+                    if let url = URL(string: artist.imageUrl), !artist.imageUrl.isEmpty {
+                        AsyncImage(url: url, transaction: Transaction(animation: .easeOut(duration: 0.28))) { phase in
+                            switch phase {
+                            case .success(let image): image.resizable().scaledToFill().transition(.opacity)
+                            case .empty: ProgressView().tint(.white.opacity(0.8))
+                            case .failure: initials(artist.name)
+                            @unknown default: initials(artist.name)
+                            }
+                        }.clipShape(Circle())
+                    } else { initials(artist.name) }
+                    Circle().stroke(selected ? NW.blue : .white.opacity(0.12), lineWidth: selected ? 3 : 1)
+                    if selected {
+                        Image(systemName: "checkmark")
+                            .font(.caption.bold()).foregroundStyle(.white)
+                            .frame(width: 27, height: 27).background(NW.blue.gradient, in: Circle())
+                            .overlay(Circle().stroke(NW.background, lineWidth: 3))
+                            .offset(x: 31, y: 31)
+                    }
+                }.frame(height: 92).scaleEffect(selected ? 1.04 : 1)
                 Text(artist.name).font(.caption.bold()).lineLimit(1)
+                if artist.source == "spotify" { Text("SPOTIFY").font(.system(size: 7, weight: .bold)).tracking(1.1).foregroundStyle(.green.opacity(0.85)) }
             }
-        }.buttonStyle(PressStyle())
+        }.buttonStyle(PressStyle()).animation(.spring(response: 0.35, dampingFraction: 0.76), value: selected)
     }
 
     private func initials(_ name: String) -> some View { Text(String(name.prefix(1))).font(.title.bold()).foregroundStyle(.white) }
@@ -223,7 +265,11 @@ struct TasteOnboardingView: View {
     private func search(_ value: String) {
         searchTask?.cancel()
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.count >= 2 else { suggestions = MusicTasteStore.featuredNames.map { ArtistChoice(name: $0) }; searching = false; return }
+        guard trimmed.count >= 2 else {
+            suggestions = featuredArtists.isEmpty ? MusicTasteStore.featuredNames.map { ArtistChoice(name: $0) } : featuredArtists
+            searching = false
+            return
+        }
         searching = true
         searchTask = Task {
             try? await Task.sleep(for: .milliseconds(350))
@@ -232,5 +278,12 @@ struct TasteOnboardingView: View {
             guard !Task.isCancelled else { return }
             await MainActor.run { suggestions = values; searching = false }
         }
+    }
+
+    private func loadFeaturedArtists() async {
+        let values = await ArtistDiscoveryService.featured()
+        guard !values.isEmpty else { return }
+        featuredArtists = values
+        if query.trimmingCharacters(in: .whitespacesAndNewlines).count < 2 { suggestions = values }
     }
 }
