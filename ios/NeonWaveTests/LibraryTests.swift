@@ -67,4 +67,19 @@ final class LibraryTests: XCTestCase {
         let choice = try XCTUnwrap(LyricsService.bestCandidate([short, full], title: "Ainsi va la rue", artist: "Rim'K", duration: 158))
         XCTAssertEqual(choice.duration, 158)
     }
+
+    func testYouTubeResolverPrefersMatchingStudioAudio() throws {
+        let live = MusicCatalogService.YouTubeCandidate(videoId: "AAAAAAAAAAA", title: "Ainsi va la rue (Live)", channel: "Concert TV", duration: 158)
+        let studio = MusicCatalogService.YouTubeCandidate(videoId: "BBBBBBBBBBB", title: "Rim'K - Ainsi va la rue (Official Audio)", channel: "Rim'K - Topic", duration: 158)
+        let choice = try XCTUnwrap(MusicCatalogService.bestYouTubeCandidate([live, studio], title: "Ainsi va la rue", artist: "Rim'K", duration: 158))
+        XCTAssertEqual(choice.videoId, "BBBBBBBBBBB")
+    }
+
+    func testYouTubeSearchHTMLKeepsMetadataTogether() throws {
+        let html = #"{"videoRenderer":{"videoId":"BBBBBBBBBBB","title":{"runs":[{"text":"Rim'K - Ainsi va la rue"}]},"longBylineText":{"runs":[{"text":"Rim'K - Topic"}]},"lengthText":{"simpleText":"2:38"}}}"#
+        let item = try XCTUnwrap(MusicCatalogService.parseYouTubeCandidates(html).first)
+        XCTAssertEqual(item.title, "Rim'K - Ainsi va la rue")
+        XCTAssertEqual(item.channel, "Rim'K - Topic")
+        XCTAssertEqual(item.duration, 158)
+    }
 }

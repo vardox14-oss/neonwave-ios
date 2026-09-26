@@ -214,6 +214,13 @@ enum MusicCatalogService {
 
     private static var ytCache: [String: String] = [:]
 
+    struct YouTubeCandidate: Equatable {
+        let videoId: String
+        let title: String
+        let channel: String
+        let duration: Double?
+    }
+
     static func resolveYouTubeId(title: String, artist: String, duration: Double = 0, spotifyId: String? = nil) async -> String? {
         let key = "\(artist.lowercased())|\(title.lowercased())"
         if let cached = ytCache[key] { return cached }
@@ -236,7 +243,7 @@ enum MusicCatalogService {
             .replacingOccurrences(of: "(ft.", with: "")
             .replacingOccurrences(of: "feat.", with: "")
             .replacingOccurrences(of: "ft.", with: "")
-        let query = "\(artist) \(cleanTitle)".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        let query = "\(artist) \(cleanTitle) official audio".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         guard let url = URL(string: "https://www.youtube.com/results?search_query=\(query)") else { return nil }
 
         var request = URLRequest(url: url)
@@ -250,6 +257,12 @@ enum MusicCatalogService {
             guard let html = String(data: data, encoding: .utf8) else { return nil }
             let ns = html as NSString
             let fullRange = NSRange(location: 0, length: ns.length)
+
+            let candidates = parseYouTubeCandidates(html)
+            if let best = bestYouTubeCandidate(candidates, title: title, artist: artist, duration: duration) {
+                ytCache[key] = best.videoId
+                return best.videoId
+            }
 
             let pattern1 = "\"videoId\":\"([A-Za-z0-9_-]{11})\""
             if let regex1 = try? NSRegularExpression(pattern: pattern1),
@@ -270,5 +283,96 @@ enum MusicCatalogService {
             }
         } catch { }
         return nil
+    }
+
+    static func bestYouTubeCandidate(_ candidates: [YouTubeCandidate], title: String, artist: String, duration: Double) -> YouTubeCandidate? {
+        candidates.max { youtubeScore($0, title: title, artist: artist, duration: duration) < youtubeScore($1, title: title, artist: artist, duration: duration) }
+    }
+
+    private static func youtubeScore(_ candidate: YouTubeCandidate, title: String, artist: String, duration: Double) -> Double {
+        let wantedTitle = normalized(title)
+        let wantedArtist = normalized(artist)
+        let candidateTitle = normalized(candidate.title)
+        let candidateChannel = normalized(candidate.channel)
+        let combined = candidateTitle + " " + candidateChannel
+        let wantedTokens = Set(wantedTitle.split(separator: " ").map(String.init).filter { $0.count > 1 })
+        let candidateTokens = Set(candidateTitle.split(separator: " ").map(String.init))
+        var score = 0.0
+        if candidateTitle.contains(wantedTitle) { score += 80 }
+        if !wantedTokens.isEmpty { score += 60 * Double(wantedTokens.intersection(candidateTokens).count) / Double(wantedTokens.count) }
+        if combined.contains(wantedArtist) { score += 55 }
+        if combined.contains("official audio") || combined.contains("audio officiel") { score += 35 }
+        if candidateChannel.contains("topic") { score += 24 }
+        if combined.contains("official") || combined.contains("officiel") { score += 12 }
+        let requestedSpecialTerms = ["live", "remix", "sped up", "slowed", "nightcore", "karaoke", "cover"]
+        for term in requestedSpecialTerms where candidateTitle.contains(term) && !wantedTitle.contains(term) { score -= 65 }
+        if duration > 0, let candidateDuration = candidate.duration {
+            let delta = abs(duration - candidateDuration)
+            if delta <= 2 { score += 65 }
+            else if delta <= 5 { score += 48 }
+            else if delta <= 12 { score += 24 }
+            else if delta > 30 { score -= min(90, delta) }
+        }
+        return score
+    }
+
+    static func parseYouTubeCandidates(_ html: String) -> [YouTubeCandidate] {
+        let ns = html as NSString
+        let pattern = #"\"videoId\":\"([A-Za-z0-9_-]{11})\""#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        var candidates: [YouTubeCandidate] = []
+        var seen = Set<String>()
+        for match in regex.matches(in: html, range: NSRange(location: 0, length: ns.length)).prefix(80) {
+            let id = ns.substring(with: match.range(at: 1))
+            guard seen.insert(id).inserted else { continue }
+            let start = match.range.location
+            let length = min(5000, ns.length - start)
+            let window = ns.substring(with: NSRange(location: start, length: length))
+            let title = firstJSONText(in: window, keys: ["title"]) ?? ""
+            guard !title.isEmpty else { continue }
+            let channel = firstJSONText(in: window, keys: ["ownerText", "longBylineText", "shortBylineText"]) ?? ""
+            let durationText = firstSimpleText(in: window, key: "lengthText")
+            candidates.append(YouTubeCandidate(videoId: id, title: title, channel: channel, duration: durationText.flatMap(parseClock)))
+        }
+        return candidates
+    }
+
+    private static func firstJSONText(in value: String, keys: [String]) -> String? {
+        for key in keys {
+            let escapedKey = NSRegularExpression.escapedPattern(for: key)
+            let patterns = [
+                "\\\"\(escapedKey)\\\":\\{\\\"runs\\\":\\[\\{\\\"text\\\":\\\"((?:\\\\.|[^\\\"])*)\\\"",
+                "\\\"\(escapedKey)\\\":\\{\\\"simpleText\\\":\\\"((?:\\\\.|[^\\\"])*)\\\""
+            ]
+            for pattern in patterns {
+                guard let regex = try? NSRegularExpression(pattern: pattern),
+                      let match = regex.firstMatch(in: value, range: NSRange(value.startIndex..., in: value)),
+                      let range = Range(match.range(at: 1), in: value) else { continue }
+                return decodeJSONString(String(value[range]))
+            }
+        }
+        return nil
+    }
+
+    private static func firstSimpleText(in value: String, key: String) -> String? {
+        firstJSONText(in: value, keys: [key])
+    }
+
+    private static func decodeJSONString(_ escaped: String) -> String {
+        let wrapped = "\"\(escaped)\""
+        return (try? JSONDecoder().decode(String.self, from: Data(wrapped.utf8))) ?? escaped
+    }
+
+    private static func parseClock(_ value: String) -> Double? {
+        let parts = value.split(separator: ":").compactMap { Double($0) }
+        guard !parts.isEmpty else { return nil }
+        return parts.reversed().enumerated().reduce(0) { $0 + $1.element * pow(60, Double($1.offset)) }
+    }
+
+    private static func normalized(_ value: String) -> String {
+        value.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .lowercased()
+            .replacingOccurrences(of: #"[^a-z0-9]+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
     }
 }
