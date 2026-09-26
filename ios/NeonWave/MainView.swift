@@ -72,6 +72,7 @@ struct HomeView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var library: LibraryStore
     @EnvironmentObject private var player: AudioPlayer
+    @EnvironmentObject private var taste: MusicTasteStore
     let importFiles: () -> Void
     private var greeting: String { Calendar.current.component(.hour, from: Date()) < 18 ? "Bonjour" : "Bonsoir" }
     var body: some View {
@@ -104,6 +105,40 @@ struct HomeView: View {
                     NavigationLink { TrackCollectionView(title: "Titres aimés", kind: .liked) } label: { shortcut("Vos favoris", subtitle: "\(library.liked.count) titres", symbol: "heart.fill", color: .purple) }
                     NavigationLink { TrackCollectionView(title: "Sur cet iPhone", kind: .downloaded) } label: { shortcut("Hors connexion", subtitle: "\(library.downloaded.count) titres", symbol: "arrow.down", color: NW.blue) }
                 }.buttonStyle(PressStyle())
+                if !taste.preferences.artists.isEmpty {
+                    SectionHeading(title: "Pensé pour vous", eyebrow: taste.preferences.genres.joined(separator: "  ·  "))
+                    ScrollView(.horizontal) {
+                        HStack(spacing: 15) {
+                            ForEach(taste.preferences.artists) { artist in
+                                VStack(spacing: 9) {
+                                    ZStack {
+                                        Circle().fill(LinearGradient(colors: NW.colors[artist.colorIndex], startPoint: .topLeading, endPoint: .bottomTrailing))
+                                        if let url = URL(string: artist.imageUrl), !artist.imageUrl.isEmpty {
+                                            AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { Text(String(artist.name.prefix(1))).font(.title.bold()) }.clipShape(Circle())
+                                        } else { Text(String(artist.name.prefix(1))).font(.title.bold()) }
+                                    }.frame(width: 82, height: 82)
+                                    Text(artist.name).font(.caption.bold()).lineLimit(1).frame(width: 92)
+                                }
+                            }
+                        }
+                    }.scrollIndicators(.hidden)
+                }
+                if !taste.recommendations.isEmpty {
+                    HStack { SectionHeading(title: "Votre sélection", eyebrow: "Selon vos artistes"); Spacer(); Button { taste.loadRecommendations() } label: { Image(systemName: "arrow.clockwise") } }
+                    ScrollView(.horizontal) {
+                        HStack(alignment: .top, spacing: 16) {
+                            ForEach(taste.recommendations) { track in
+                                Button { player.play(track, in: taste.recommendations) } label: {
+                                    VStack(alignment: .leading, spacing: 9) {
+                                        CoverArt(track: track, remoteURL: track.artworkURL, radius: 20).frame(width: 158)
+                                        Text(track.title).font(.subheadline.bold()).foregroundStyle(.white).lineLimit(1)
+                                        Text(track.artist).font(.caption).foregroundStyle(NW.muted).lineLimit(1)
+                                    }.frame(width: 158, alignment: .leading)
+                                }.buttonStyle(PressStyle())
+                            }
+                        }
+                    }.scrollIndicators(.hidden)
+                }
                 if !library.recent.isEmpty {
                     SectionHeading(title: "On reprend ?", eyebrow: "Récemment écoutés")
                     ScrollView(.horizontal) {

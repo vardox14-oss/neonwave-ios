@@ -67,6 +67,7 @@ private final class SilentAudioKeepAlive {
     @Published private(set) var current: Track?
     @Published private(set) var queue: [Track] = []
     @Published private(set) var isPlaying = false
+    @Published private(set) var isBuffering = false
     @Published private(set) var elapsed: Double = 0
     @Published private(set) var duration: Double = 0
     @Published var shuffle = false
@@ -90,6 +91,7 @@ private final class SilentAudioKeepAlive {
     private var observers: [NSObjectProtocol] = []
     private var sleepTask: Task<Void, Never>?
     private var lyricsTask: Task<Void, Never>?
+    private var lyricsFallbackTask: Task<Void, Never>?
     private var lyricsRequestedDuration: Double = 0
     private var index = 0
     private weak var library: LibraryStore?
@@ -153,7 +155,7 @@ private final class SilentAudioKeepAlive {
                 self.elapsed = cur
                 if dur > 0 {
                     self.duration = dur
-                    if abs(self.lyricsRequestedDuration - dur) > 2 {
+                    if self.lyricsRequestedDuration == 0 || abs(self.lyricsRequestedDuration - dur) > 2 {
                         self.fetchLyricsForCurrent(preferredDuration: dur)
                     }
                 }
@@ -166,6 +168,7 @@ private final class SilentAudioKeepAlive {
             Task { @MainActor in
                 guard let self, self.isYouTubeActive else { return }
                 self.isPlaying = playing
+                if playing { self.isBuffering = false }
                 self.updateNowPlaying()
             }
         }
@@ -225,11 +228,10 @@ private final class SilentAudioKeepAlive {
         let target = queue[index]
         resolveTask?.cancel()
 
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [])
         try? AVAudioSession.sharedInstance().setActive(true)
         current = target; elapsed = 0; duration = target.duration; lyricsOffset = 0; lyricsRequestedDuration = 0
-
-        fetchLyricsForCurrent(preferredDuration: target.duration)
+        lyricsTask?.cancel(); lyricsFallbackTask?.cancel(); lyrics = []; plainLyrics = nil; activeLyricIndex = nil; loadingLyrics = true
         updateNowPlaying(includeArtwork: true)
 
         // 1. If downloaded / imported locally, use native AVPlayer
@@ -245,14 +247,25 @@ private final class SilentAudioKeepAlive {
             player.replaceCurrentItem(with: item)
             player.automaticallyWaitsToMinimizeStalling = true
             player.playImmediately(atRate: 1.0)
-            isPlaying = true
+            isPlaying = true; isBuffering = false
+            fetchLyricsForCurrent(preferredDuration: target.duration)
             library?.recordPlay(target)
             return
         }
 
         // 2. Online track: resolve YouTube full song
         isYouTubeActive = true
+        isPlaying = false
+        isBuffering = true
         player.replaceCurrentItem(with: nil) // Stop AVPlayer preview
+        lyricsFallbackTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(6))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard let self, self.current?.id == target.id, self.lyricsRequestedDuration == 0 else { return }
+                self.fetchLyricsForCurrent(preferredDuration: target.duration)
+            }
+        }
 
         if let existingVid = target.videoId, !existingVid.isEmpty {
             startYouTubePlayback(videoId: existingVid)
@@ -282,7 +295,8 @@ private final class SilentAudioKeepAlive {
         isYouTubeActive = true
         SilentAudioKeepAlive.shared.start()
         YouTubePlayer.shared.playVideo(videoId)
-        isPlaying = true
+        isPlaying = false
+        isBuffering = true
         updateNowPlaying(includeArtwork: true)
     }
 
@@ -297,7 +311,8 @@ private final class SilentAudioKeepAlive {
         player.replaceCurrentItem(with: item)
         player.automaticallyWaitsToMinimizeStalling = true
         player.playImmediately(atRate: 1.0)
-        isPlaying = true
+        isPlaying = true; isBuffering = false
+        if lyricsRequestedDuration == 0 { fetchLyricsForCurrent(preferredDuration: current?.duration ?? 0) }
         updateNowPlaying(includeArtwork: true)
     }
 
@@ -347,7 +362,7 @@ private final class SilentAudioKeepAlive {
         } else {
             player.pause()
         }
-        isPlaying = false
+        isPlaying = false; isBuffering = false
         updateNowPlaying()
     }
 
@@ -356,12 +371,14 @@ private final class SilentAudioKeepAlive {
         do {
             try AVAudioSession.sharedInstance().setActive(true)
             if isYouTubeActive {
+                isBuffering = true
                 SilentAudioKeepAlive.shared.start()
                 YouTubePlayer.shared.resume()
             } else {
                 player.play()
+                isPlaying = true
+                isBuffering = false
             }
-            isPlaying = true
             updateNowPlaying()
         } catch {
             self.error = "Impossible de reprendre la lecture."
@@ -420,6 +437,8 @@ private final class SilentAudioKeepAlive {
 
     func stop() {
         resolveTask?.cancel()
+        lyricsTask?.cancel()
+        lyricsFallbackTask?.cancel()
         if isYouTubeActive {
             YouTubePlayer.shared.stop()
             SilentAudioKeepAlive.shared.stop()
@@ -427,6 +446,8 @@ private final class SilentAudioKeepAlive {
         player.pause()
         player.replaceCurrentItem(with: nil)
         isYouTubeActive = false
+        isPlaying = false
+        isBuffering = false
         current = nil
         queue = []
         elapsed = 0

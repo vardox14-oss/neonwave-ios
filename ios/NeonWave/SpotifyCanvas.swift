@@ -90,6 +90,7 @@ struct SpotifyCanvasView: View {
     let track: Track
     let isPlaying: Bool
     @State private var state: SpotifyCanvasState = .loading
+    @State private var reloadID = UUID()
 
     var body: some View {
         ZStack {
@@ -117,18 +118,19 @@ struct SpotifyCanvasView: View {
                     }
                     Rectangle().fill(.black.opacity(0.52))
                     VStack(spacing: 12) {
-                        Image(systemName: "sparkles.tv").font(.system(size: 34, weight: .light))
-                        Text("Canvas indisponible").font(.headline)
+                        Image(systemName: "sparkles.tv.fill").font(.system(size: 38, weight: .light)).foregroundStyle(NW.blue)
+                        Text("Canvas Spotify").font(.title3.bold())
                         Text(message).font(.caption).foregroundStyle(.white.opacity(0.7)).multilineTextAlignment(.center).padding(.horizontal, 30)
+                        Button { reloadID = UUID() } label: { Label("Réessayer", systemImage: "arrow.clockwise").font(.caption.bold()).padding(.horizontal, 16).padding(.vertical, 10).background(.white.opacity(0.12), in: Capsule()) }
                     }
                 }
             }
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 360)
+        .frame(maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 28))
         .overlay(RoundedRectangle(cornerRadius: 28).stroke(.white.opacity(0.08)))
-        .task(id: track.id) {
+        .task(id: "\(track.id)-\(reloadID.uuidString)") {
             state = .loading
             state = await SpotifyCanvasService.load(for: track)
         }

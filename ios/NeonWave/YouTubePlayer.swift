@@ -117,14 +117,25 @@ final class YouTubePlayer: NSObject, ObservableObject, WKScriptMessageHandler, W
         }
         function playVideoId(id) {
             if (player && typeof player.loadVideoById === 'function') {
+                if (player.unMute) player.unMute();
+                if (player.setVolume) player.setVolume(100);
                 player.loadVideoById({
                     videoId: id,
                     startSeconds: 0
                 });
                 player.playVideo();
+                setTimeout(function() {
+                    if (player && player.unMute) player.unMute();
+                    if (player && player.setVolume) player.setVolume(100);
+                    if (player && player.playVideo) player.playVideo();
+                }, 350);
             }
         }
-        function resume() { if (player && player.playVideo) player.playVideo(); }
+        function resume() {
+            if (player && player.unMute) player.unMute();
+            if (player && player.setVolume) player.setVolume(100);
+            if (player && player.playVideo) player.playVideo();
+        }
         function pause() { if (player && player.pauseVideo) player.pauseVideo(); }
         function seek(sec) { if (player && player.seekTo) player.seekTo(sec, true); }
         </script>
@@ -181,7 +192,6 @@ final class YouTubePlayer: NSObject, ObservableObject, WKScriptMessageHandler, W
     }
 
     func resume() {
-        isPlaying = true
         _ = webView
         webView.evaluateJavaScript("resume();")
     }

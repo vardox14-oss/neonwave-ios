@@ -5,12 +5,14 @@ struct SettingsView: View {
     @EnvironmentObject private var library: LibraryStore
     @EnvironmentObject private var player: AudioPlayer
     @EnvironmentObject private var downloads: DownloadManager
+    @EnvironmentObject private var taste: MusicTasteStore
     @Environment(\.dismiss) private var dismiss
     @State private var confirmLogout = false
     @State private var confirmDelete = false
     @State private var deleting = false
     @State private var error: String?
     @State private var showPrivacy = false
+    @State private var showTaste = false
     var body: some View {
         NavigationStack {
             List {
@@ -27,6 +29,7 @@ struct SettingsView: View {
                     stat("Stockage audio", value: ByteCountFormatter.string(fromByteCount: library.storageBytes, countStyle: .file), symbol: "internaldrive")
                 }.listRowBackground(NW.surface)
                 Section("À votre façon") {
+                    Button { showTaste = true } label: { Label("Mes goûts musicaux", systemImage: "sparkles") }
                     Toggle("Retours haptiques", isOn: Binding(get: { library.snapshot.haptics }, set: library.setHaptics))
                     Toggle("Téléchargements en Wi-Fi", isOn: Binding(get: { library.snapshot.wifiOnly }, set: library.setWifiOnly))
                 }.listRowBackground(NW.surface)
@@ -46,6 +49,7 @@ struct SettingsView: View {
                 .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Terminé") { dismiss() } } }
         }
         .sheet(isPresented: $showPrivacy) { PrivacyView() }
+        .fullScreenCover(isPresented: $showTaste) { TasteOnboardingView(editing: true).environmentObject(taste) }
         .confirmationDialog("Quitter cet espace ?", isPresented: $confirmLogout, titleVisibility: .visible) {
             Button(session.isGuest ? "Revenir à la connexion" : "Se déconnecter") {
                 Task { player.stop(); await downloads.cancelAll(); dismiss(); session.signOut() }

@@ -43,6 +43,28 @@ struct LyricLine: Identifiable, Hashable {
     let text: String
 }
 
+struct ArtistChoice: Identifiable, Codable, Hashable {
+    var spotifyId: String = ""
+    var name: String
+    var imageUrl: String = ""
+    var spotifyUrl: String = ""
+    var genres: [String] = []
+    var popularity: Int = 0
+    var followers: Int = 0
+    var source: String = "local"
+
+    var id: String { spotifyId.isEmpty ? name.lowercased() : spotifyId }
+    var colorIndex: Int { name.utf8.reduce(0) { ($0 + Int($1)) % 6 } }
+}
+
+struct MusicPreferences: Codable, Equatable {
+    var completed = false
+    var genres: [String] = []
+    var artists: [ArtistChoice] = []
+    var followedArtists: [ArtistChoice] = []
+    var spotifyEnabled: Bool? = nil
+}
+
 struct Playlist: Identifiable, Codable, Hashable {
     var id = UUID().uuidString
     var name: String
