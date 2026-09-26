@@ -10,10 +10,9 @@ final class DownloadManager: NSObject, ObservableObject, URLSessionDownloadDeleg
     var backgroundCompletion: (() -> Void)?
     private weak var library: LibraryStore?
     private lazy var session: URLSession = {
-        let configuration = URLSessionConfiguration.background(withIdentifier: Self.sessionIdentifier)
-        configuration.sessionSendsLaunchEvents = true
-        configuration.isDiscretionary = false
-        configuration.httpMaximumConnectionsPerHost = 3
+        let configuration = URLSessionConfiguration.default
+        configuration.httpMaximumConnectionsPerHost = 4
+        configuration.timeoutIntervalForRequest = 30
         return URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
     }()
     struct DownloadInfo: Codable {
@@ -83,22 +82,26 @@ final class DownloadManager: NSObject, ObservableObject, URLSessionDownloadDeleg
     }
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
         guard let info = Self.info(downloadTask) else { return }
-        guard let response = downloadTask.response as? HTTPURLResponse, [200, 206].contains(response.statusCode) else {
+        guard let response = downloadTask.response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else {
             Task { @MainActor in self.progress[info.trackID] = nil; self.error = "Téléchargement impossible. Réessayez." }; return
         }
         do {
             // URLSession deletes the temporary file when this callback returns.
-            // Move synchronously, before dispatching the library update to the main actor.
-            if FileManager.default.fileExists(atPath: info.destination.path) { try FileManager.default.removeItem(at: info.destination) }
+            if FileManager.default.fileExists(atPath: info.destination.path) { try? FileManager.default.removeItem(at: info.destination) }
             try FileManager.default.moveItem(at: location, to: info.destination)
-            try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: info.destination.path)
-            var url = info.destination; var values = URLResourceValues(); values.isExcludedFromBackup = true; try url.setResourceValues(values)
+            try? FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: info.destination.path)
+            var url = info.destination; var values = URLResourceValues(); values.isExcludedFromBackup = true; try? url.setResourceValues(values)
             Task { @MainActor in
                 guard self.library?.userID == info.userID else { return }
                 self.library?.finishDownload(trackID: info.trackID, fileName: info.destination.lastPathComponent)
                 self.progress[info.trackID] = nil
             }
-        } catch { Task { @MainActor in self.progress[info.trackID] = nil; self.error = "Espace insuffisant ou fichier inaccessible. Réessayez le téléchargement." } }
+        } catch {
+            Task { @MainActor in
+                self.progress[info.trackID] = nil
+                self.error = "Erreur lors de l'enregistrement du fichier."
+            }
+        }
     }
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         guard let info = Self.info(task), let error else { return }
@@ -108,8 +111,16 @@ final class DownloadManager: NSObject, ObservableObject, URLSessionDownloadDeleg
         }
     }
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
-        // A private audio request must not send its credentials to another origin.
-        completionHandler(request.url?.host == task.originalRequest?.url?.host && request.url?.scheme == "https" ? request : nil)
+        // Allow CDN redirections (Deezer, iTunes, etc.), stripping private auth header if host changes.
+        if let url = request.url, url.scheme == "https" || url.scheme == "http" {
+            var sanitized = request
+            if request.url?.host != task.originalRequest?.url?.host {
+                sanitized.setValue(nil, forHTTPHeaderField: "Authorization")
+            }
+            completionHandler(sanitized)
+        } else {
+            completionHandler(nil)
+        }
     }
     func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
         DispatchQueue.main.async { self.backgroundCompletion?(); self.backgroundCompletion = nil }

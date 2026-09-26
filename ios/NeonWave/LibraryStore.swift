@@ -169,7 +169,10 @@ import UniformTypeIdentifiers
             message = "« \(track.title) » est sauvegardé sur votre compte."
         } catch { message = error.localizedDescription }
     }
-    func downloadDestination(_ track: Track) -> URL { directory.appendingPathComponent("\(track.id).audio") }
+    func downloadDestination(_ track: Track) -> URL {
+        let ext = (track.streamURL?.contains(".m4a") == true || track.streamURL?.contains(".aac") == true) ? "m4a" : "mp3"
+        return directory.appendingPathComponent("\(track.id).\(ext)")
+    }
     func finishDownload(trackID: String, fileName: String) {
         guard let index = snapshot.tracks.firstIndex(where: { $0.id == trackID }) else { return }
         snapshot.tracks[index].fileName = fileName; persist()

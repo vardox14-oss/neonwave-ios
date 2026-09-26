@@ -11,7 +11,13 @@ struct TrackRow: View {
     @State private var confirmDelete = false
     var body: some View {
         HStack(spacing: 12) {
-            Button { player.play(track, in: context.isEmpty ? [track] : context) } label: {
+            Button {
+                if player.current?.id == track.id {
+                    if player.isPlaying { player.pause() } else { player.resume() }
+                } else {
+                    player.play(track, in: context.isEmpty ? [track] : context)
+                }
+            } label: {
                 HStack(spacing: 13) {
                     CoverArt(track: track, imageURL: library.artworkURL(track), remoteURL: track.artworkURL, radius: 12).frame(width: 52, height: 52)
                     VStack(alignment: .leading, spacing: 5) {
@@ -22,7 +28,7 @@ struct TrackRow: View {
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }.contentShape(Rectangle())
-            }.buttonStyle(PressStyle()).accessibilityLabel("Écouter \(track.title), \(track.artist)")
+            }.buttonStyle(.plain).accessibilityLabel("Écouter \(track.title), \(track.artist)")
             if let progress = downloads.progress[track.id] {
                 Button { downloads.cancel(track.id) } label: { ProgressView(value: progress).progressViewStyle(.circular).frame(width: 30) }.accessibilityLabel("Annuler le téléchargement")
             } else if library.localURL(track) == nil && (track.remoteID != nil || track.streamURL != nil) {
@@ -173,8 +179,8 @@ struct LibraryView: View {
                         }
                     }
                 }
-            }.padding(22).padding(.bottom, 15)
-        }.scrollIndicators(.hidden).alert("Une nouvelle ambiance", isPresented: $newPlaylist) {
+            }.padding(22).padding(.bottom, 120)
+        }.scrollIndicators(.visible).scrollBounceBehavior(.always, axes: .vertical).alert("Une nouvelle ambiance", isPresented: $newPlaylist) {
             TextField("Nom de votre playlist", text: $playlistName)
             Button("Annuler", role: .cancel) { playlistName = "" }
             Button("Créer") { library.createPlaylist(playlistName); playlistName = "" }
@@ -308,7 +314,7 @@ struct SearchView: View {
                                             }
                                             .frame(width: 140, alignment: .leading)
                                         }
-                                        .buttonStyle(PressStyle())
+                                        .buttonStyle(.plain)
                                     }
                                 }
                                 .padding(.horizontal, 2)
@@ -339,10 +345,15 @@ struct SearchView: View {
                     }
                 }
             }
-            .padding(22)
+            .padding(.horizontal, 22)
+            .padding(.top, 14)
+            .padding(.bottom, 140)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         }
         .scrollDismissesKeyboard(.interactively)
-        .scrollIndicators(.hidden)
+        .scrollIndicators(.visible)
+        .scrollBounceBehavior(.always, axes: .vertical)
         .sheet(item: $selectedAlbum) { album in
             AlbumDetailView(album: album)
         }
@@ -441,8 +452,12 @@ struct AlbumDetailView: View {
                         }
                     }
                 }
-                .padding(.bottom, 30)
+                .padding(.bottom, 120)
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
             }
+            .scrollIndicators(.visible)
+            .scrollBounceBehavior(.always, axes: .vertical)
             .background(NW.background)
             .navigationTitle("Album")
             .navigationBarTitleDisplayMode(.inline)
@@ -502,7 +517,7 @@ struct DownloadsView: View {
                     SectionHeading(title: "Disponibles hors connexion")
                     LazyVStack(spacing: 2) { ForEach(library.downloaded) { TrackRow(track: $0, context: library.downloaded) } }
                 }
-            }.padding(22)
-        }.scrollIndicators(.hidden)
+            }.padding(22).padding(.bottom, 120)
+        }.scrollIndicators(.visible).scrollBounceBehavior(.always, axes: .vertical)
     }
 }

@@ -86,6 +86,10 @@ import MediaPlayer
     }
 
     func play(_ track: Track, in tracks: [Track]? = nil) {
+        if current?.id == track.id {
+            if isPlaying { pause() } else { resume() }
+            return
+        }
         let list = tracks ?? [track]
         let playable = list.filter { playableURL(for: $0) != nil }
         guard !playable.isEmpty, let target = playable.first(where: { $0.id == track.id }) ?? playable.first else {
@@ -98,17 +102,16 @@ import MediaPlayer
 
     private func loadCurrent() {
         guard queue.indices.contains(index), let url = playableURL(for: queue[index]) else { stop(); return }
-        do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, policy: .longFormAudio)
-            try AVAudioSession.sharedInstance().setActive(true)
-        } catch { self.error = "La sortie audio n’est pas disponible."; return }
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+        try? AVAudioSession.sharedInstance().setActive(true)
         current = queue[index]; elapsed = 0; duration = current?.duration ?? 0
         let item = AVPlayerItem(url: url)
         statusObserver = item.observe(\.status, options: [.new]) { [weak self] item, _ in
             if item.status == .failed { Task { @MainActor in self?.error = "Ce flux audio ne peut pas être lu."; self?.pause() } }
         }
         player.replaceCurrentItem(with: item)
-        player.play()
+        player.automaticallyWaitsToMinimizeStalling = true
+        player.playImmediately(atRate: 1.0)
         if let library, library.localURL(queue[index]) != nil {
             library.recordPlay(queue[index])
         }

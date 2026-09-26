@@ -131,8 +131,8 @@ struct HomeView: View {
                         Text("Pas de publicité. Juste votre musique.").font(.caption2).foregroundStyle(NW.muted)
                     }
                 }.padding(.vertical, 6)
-            }.padding(.horizontal, 22).padding(.bottom, 24)
-        }.scrollIndicators(.hidden)
+            }.padding(.horizontal, 22).padding(.bottom, 120)
+        }.scrollIndicators(.visible).scrollBounceBehavior(.always, axes: .vertical)
     }
     private func shortcut(_ title: String, subtitle: String, symbol: String, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 12) {
