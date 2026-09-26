@@ -22,6 +22,10 @@ enum MusicCatalogService {
         let duration: Double?
     }
 
+    private struct StreamTicketResponse: Decodable {
+        let path: String
+    }
+
     private struct DeezerSearchResponse: Decodable {
         struct Item: Decodable {
             let id: Int
@@ -213,6 +217,15 @@ enum MusicCatalogService {
     }
 
     private static var ytCache: [String: String] = [:]
+
+    static func nativeStreamURL(videoId: String) async -> URL? {
+        guard let baseURL = AppConfiguration.apiURL,
+              let response: StreamTicketResponse = try? await APIClient().call(
+                "api/music/streams/\(videoId)/ticket",
+                method: "POST"
+              ) else { return nil }
+        return URL(string: response.path, relativeTo: baseURL)?.absoluteURL
+    }
 
     struct YouTubeCandidate: Equatable {
         let videoId: String

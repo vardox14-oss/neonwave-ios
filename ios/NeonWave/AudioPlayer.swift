@@ -104,7 +104,12 @@ private final class SilentAudioKeepAlive {
                 guard let self, !self.isYouTubeActive else { return }
                 self.elapsed = time.seconds.isFinite ? time.seconds : 0
                 let length = self.player.currentItem?.duration.seconds ?? 0
-                if length.isFinite && length > 0 { self.duration = length }
+                if length.isFinite && length > 0 {
+                    self.duration = length
+                    if self.lyricsRequestedDuration == 0 || abs(self.lyricsRequestedDuration - length) > 2 {
+                        self.fetchLyricsForCurrent(preferredDuration: length)
+                    }
+                }
                 self.updateActiveLyric()
                 self.updateNowPlaying()
             }
@@ -113,6 +118,8 @@ private final class SilentAudioKeepAlive {
             Task { @MainActor in
                 guard let self, !self.isYouTubeActive else { return }
                 self.isPlaying = self.player.timeControlStatus == .playing
+                self.isBuffering = self.player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+                self.updateNowPlaying()
             }
         }
         observers.append(NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: nil, queue: .main) { [weak self] notification in
@@ -253,8 +260,10 @@ private final class SilentAudioKeepAlive {
             return
         }
 
-        // 2. Online track: resolve YouTube full song
-        isYouTubeActive = true
+        // 2. Online track: resolve the complete song, then play it natively.
+        // Native AVPlayer keeps playing with the screen locked and exposes the
+        // real iOS lock-screen controls.
+        isYouTubeActive = false
         isPlaying = false
         isBuffering = true
         player.replaceCurrentItem(with: nil) // Stop AVPlayer preview
@@ -268,7 +277,7 @@ private final class SilentAudioKeepAlive {
         }
 
         if let existingVid = target.videoId, !existingVid.isEmpty {
-            startYouTubePlayback(videoId: existingVid)
+            startNativeOnlinePlayback(videoId: existingVid, trackID: target.id)
         } else {
             resolveTask = Task { [weak self] in
                 guard let self else { return }
@@ -279,7 +288,7 @@ private final class SilentAudioKeepAlive {
                         if self.queue.indices.contains(self.index) {
                             self.queue[self.index].videoId = vid
                         }
-                        self.startYouTubePlayback(videoId: vid)
+                        self.startNativeOnlinePlayback(videoId: vid, trackID: target.id)
                     } else if let stream = target.streamURL, let url = URL(string: stream) {
                         self.startAVPlayerFallback(url: url)
                     } else {
@@ -287,6 +296,22 @@ private final class SilentAudioKeepAlive {
                         self.pause()
                     }
                 }
+            }
+        }
+    }
+
+    private func startNativeOnlinePlayback(videoId: String, trackID: String) {
+        resolveTask?.cancel()
+        isYouTubeActive = false
+        isPlaying = false
+        isBuffering = true
+        resolveTask = Task { [weak self] in
+            let nativeURL = await MusicCatalogService.nativeStreamURL(videoId: videoId)
+            guard !Task.isCancelled, let self, self.current?.id == trackID else { return }
+            if let nativeURL {
+                self.startAVPlayerFallback(url: nativeURL, fallbackVideoId: videoId)
+            } else {
+                self.startYouTubePlayback(videoId: videoId)
             }
         }
     }
@@ -300,18 +325,27 @@ private final class SilentAudioKeepAlive {
         updateNowPlaying(includeArtwork: true)
     }
 
-    private func startAVPlayerFallback(url: URL) {
+    private func startAVPlayerFallback(url: URL, fallbackVideoId: String? = nil) {
         isYouTubeActive = false
         SilentAudioKeepAlive.shared.stop()
         YouTubePlayer.shared.stop()
         let item = AVPlayerItem(url: url)
         statusObserver = item.observe(\.status, options: [.new]) { [weak self] item, _ in
-            if item.status == .failed { Task { @MainActor in self?.error = "Ce flux audio ne peut pas être lu."; self?.pause() } }
+            guard item.status == .failed else { return }
+            Task { @MainActor in
+                guard let self else { return }
+                if let fallbackVideoId {
+                    self.startYouTubePlayback(videoId: fallbackVideoId)
+                } else {
+                    self.error = "Ce flux audio ne peut pas être lu."
+                    self.pause()
+                }
+            }
         }
         player.replaceCurrentItem(with: item)
         player.automaticallyWaitsToMinimizeStalling = true
         player.playImmediately(atRate: 1.0)
-        isPlaying = true; isBuffering = false
+        isPlaying = false; isBuffering = true
         if lyricsRequestedDuration == 0 { fetchLyricsForCurrent(preferredDuration: current?.duration ?? 0) }
         updateNowPlaying(includeArtwork: true)
     }
