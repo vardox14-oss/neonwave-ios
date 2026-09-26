@@ -82,24 +82,26 @@ jobs:
           PY
 
       - name: Capture the redesigned welcome screen before tests
+        continue-on-error: true
         env:
           SIMULATOR_ID: ${{ steps.device.outputs.udid }}
         run: |
           set -euo pipefail
           xcrun simctl shutdown all 2>/dev/null || true
-          xcrun simctl boot "$SIMULATOR_ID"
+          perl -e '$seconds=shift; alarm $seconds; exec @ARGV' 30 xcrun simctl boot "$SIMULATOR_ID"
           perl -e '$seconds=shift; alarm $seconds; exec @ARGV' 120 xcrun simctl bootstatus "$SIMULATOR_ID" -b
-          xcrun simctl install "$SIMULATOR_ID" ios/DerivedData/Build/Products/Debug-iphonesimulator/NeonWave.app
-          xcrun simctl launch --terminate-running-process "$SIMULATOR_ID" app.neonwave.ios
+          perl -e '$seconds=shift; alarm $seconds; exec @ARGV' 60 xcrun simctl install "$SIMULATOR_ID" ios/DerivedData/Build/Products/Debug-iphonesimulator/NeonWave.app
+          perl -e '$seconds=shift; alarm $seconds; exec @ARGV' 30 xcrun simctl launch --terminate-running-process "$SIMULATOR_ID" app.neonwave.ios
           sleep 5
-          xcrun simctl io "$SIMULATOR_ID" screenshot ios/build/NeonWave-Premium-UI.png
+          perl -e '$seconds=shift; alarm $seconds; exec @ARGV' 30 xcrun simctl io "$SIMULATOR_ID" screenshot ios/build/NeonWave-Premium-UI.png
 
       - name: Save the visual preview immediately
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: NeonWave-Premium-UI
           path: ios/build/NeonWave-Premium-UI.png
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7
 
       - name: Run the native library tests

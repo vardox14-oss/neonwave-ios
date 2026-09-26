@@ -8,6 +8,7 @@ struct Track: Identifiable, Codable, Hashable {
     var fileName: String?
     var remoteID: String?
     var artworkFile: String?
+    var canvasFile: String?
     var album: String?
     var artworkURL: String?
     var streamURL: String?
@@ -17,15 +18,21 @@ struct Track: Identifiable, Codable, Hashable {
     var playCount: Int
     var lastPlayedAt: Date?
 
-    init(id: String = UUID().uuidString, title: String, artist: String = "Artiste inconnu", duration: Double = 0, fileName: String? = nil, remoteID: String? = nil, artworkFile: String? = nil, album: String? = nil, artworkURL: String? = nil, streamURL: String? = nil, videoId: String? = nil, spotifyId: String? = nil) {
+    init(id: String = UUID().uuidString, title: String, artist: String = "Artiste inconnu", duration: Double = 0, fileName: String? = nil, remoteID: String? = nil, artworkFile: String? = nil, canvasFile: String? = nil, album: String? = nil, artworkURL: String? = nil, streamURL: String? = nil, videoId: String? = nil, spotifyId: String? = nil) {
         self.id = id; self.title = title; self.artist = artist; self.duration = duration
-        self.fileName = fileName; self.remoteID = remoteID; self.artworkFile = artworkFile
+        self.fileName = fileName; self.remoteID = remoteID; self.artworkFile = artworkFile; self.canvasFile = canvasFile
         self.album = album; self.artworkURL = artworkURL; self.streamURL = streamURL
         self.videoId = videoId
         self.spotifyId = spotifyId
         self.addedAt = Date(); self.playCount = 0
     }
     var colorIndex: Int { id.utf8.reduce(0) { ($0 + Int($1)) % 6 } }
+    var canDownload: Bool {
+        remoteID != nil || streamURL != nil || videoId != nil || spotifyId != nil
+    }
+    var isDownloadedSource: Bool {
+        remoteID != nil || streamURL != nil || videoId != nil || spotifyId != nil
+    }
 }
 
 struct Album: Identifiable, Codable, Hashable {

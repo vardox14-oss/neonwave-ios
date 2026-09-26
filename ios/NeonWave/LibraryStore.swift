@@ -17,8 +17,11 @@ import UniformTypeIdentifiers
     var recent: [Track] { tracks.filter { $0.lastPlayedAt != nil }.sorted { ($0.lastPlayedAt ?? .distantPast) > ($1.lastPlayedAt ?? .distantPast) } }
     var storageBytes: Int64 {
         downloaded.reduce(0) { total, track in
-            guard let url = localURL(track), let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else { return total }
-            return total + ((attributes[.size] as? NSNumber)?.int64Value ?? 0)
+            let urls = [localURL(track), artworkURL(track), canvasURL(track)].compactMap { $0 }
+            return total + urls.reduce(0) { subtotal, url in
+                let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+                return subtotal + ((attributes?[.size] as? NSNumber)?.int64Value ?? 0)
+            }
         }
     }
 
@@ -45,6 +48,10 @@ import UniformTypeIdentifiers
         return url
     }
     func artworkURL(_ track: Track) -> URL? { track.artworkFile.flatMap(fileURL) }
+    func canvasURL(_ track: Track) -> URL? {
+        guard let name = track.canvasFile, let url = fileURL(name), FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return url
+    }
     func playlistTracks(_ playlist: Playlist) -> [Track] { playlist.trackIDs.compactMap { id in tracks.first { $0.id == id } } }
     private func persist() {
         do { try JSONEncoder().encode(snapshot).write(to: directory.appendingPathComponent("library.json"), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]) }
@@ -169,25 +176,77 @@ import UniformTypeIdentifiers
             message = "« \(track.title) » est sauvegardé sur votre compte."
         } catch { message = error.localizedDescription }
     }
-    func downloadDestination(_ track: Track) -> URL {
-        let ext = (track.streamURL?.contains(".m4a") == true || track.streamURL?.contains(".aac") == true) ? "m4a" : "mp3"
+    func downloadDestination(_ track: Track, fileExtension: String? = nil) -> URL {
+        let ext = fileExtension ?? ((track.videoId != nil || track.spotifyId != nil || track.streamURL?.contains(".m4a") == true || track.streamURL?.contains(".aac") == true) ? "m4a" : "mp3")
         return directory.appendingPathComponent("\(track.id).\(ext)")
+    }
+    func setResolvedVideoID(trackID: String, videoID: String) {
+        guard let index = snapshot.tracks.firstIndex(where: { $0.id == trackID }), snapshot.tracks[index].videoId != videoID else { return }
+        snapshot.tracks[index].videoId = videoID; persist()
     }
     func finishDownload(trackID: String, fileName: String) {
         guard let index = snapshot.tracks.firstIndex(where: { $0.id == trackID }) else { return }
         snapshot.tracks[index].fileName = fileName; persist()
     }
+    func cacheOfflineMedia(trackID: String) async {
+        guard let original = snapshot.tracks.first(where: { $0.id == trackID }), localURL(original) != nil else { return }
+        let owner = userID
+
+        if artworkURL(original) == nil, let source = original.artworkURL.flatMap(URL.init(string:)) {
+            do {
+                let (data, response) = try await URLSession.shared.data(from: source)
+                guard owner == userID,
+                      let response = response as? HTTPURLResponse,
+                      (200..<300).contains(response.statusCode),
+                      data.count < 12 * 1024 * 1024,
+                      let image = UIImage(data: data),
+                      let jpeg = image.jpegData(compressionQuality: 0.86) else { throw URLError(.cannotDecodeContentData) }
+                let name = "\(trackID)-cover.jpg"
+                guard let destination = fileURL(name) else { return }
+                try jpeg.write(to: destination, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+                if let index = snapshot.tracks.firstIndex(where: { $0.id == trackID }) { snapshot.tracks[index].artworkFile = name; persist() }
+            } catch { }
+        }
+
+        guard owner == userID,
+              let current = snapshot.tracks.first(where: { $0.id == trackID }),
+              canvasURL(current) == nil else { return }
+        let canvasState = await SpotifyCanvasService.load(for: current)
+        guard case .ready(let source) = canvasState, !source.isFileURL else { return }
+        do {
+            let (temporary, response) = try await URLSession.shared.download(from: source)
+            guard owner == userID,
+                  let response = response as? HTTPURLResponse,
+                  (200..<300).contains(response.statusCode) else { return }
+            let attributes = try FileManager.default.attributesOfItem(atPath: temporary.path)
+            let size = (attributes[.size] as? NSNumber)?.int64Value ?? 0
+            guard size > 16_384, size < 80 * 1024 * 1024 else { return }
+            let name = "\(trackID)-canvas.mp4"
+            guard let destination = fileURL(name) else { return }
+            if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
+            try FileManager.default.moveItem(at: temporary, to: destination)
+            try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: destination.path)
+            var url = destination; var values = URLResourceValues(); values.isExcludedFromBackup = true; try? url.setResourceValues(values)
+            if let index = snapshot.tracks.firstIndex(where: { $0.id == trackID }) { snapshot.tracks[index].canvasFile = name; persist() }
+        } catch { }
+    }
     func removeDownload(_ track: Track) {
-        guard track.remoteID != nil else { return }
+        guard track.isDownloadedSource else { return }
         do {
             if let url = localURL(track) { try FileManager.default.removeItem(at: url) }
-            if let index = snapshot.tracks.firstIndex(where: { $0.id == track.id }) { snapshot.tracks[index].fileName = nil; persist() }
+            if let url = canvasURL(track) { try? FileManager.default.removeItem(at: url) }
+            if let index = snapshot.tracks.firstIndex(where: { $0.id == track.id }) {
+                snapshot.tracks[index].fileName = nil
+                snapshot.tracks[index].canvasFile = nil
+                persist()
+            }
         } catch { message = "Impossible de supprimer ce téléchargement." }
     }
     func deleteTrack(_ track: Track) {
         do {
             if let url = localURL(track) { try FileManager.default.removeItem(at: url) }
             if let url = artworkURL(track) { try? FileManager.default.removeItem(at: url) }
+            if let url = canvasURL(track) { try? FileManager.default.removeItem(at: url) }
             snapshot.tracks.removeAll { $0.id == track.id }; snapshot.likedIDs.remove(track.id)
             for index in snapshot.playlists.indices { snapshot.playlists[index].trackIDs.removeAll { $0 == track.id } }
             persist()

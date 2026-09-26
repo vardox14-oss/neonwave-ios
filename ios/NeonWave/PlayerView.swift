@@ -102,6 +102,10 @@ struct PlayerView: View {
             }
             canvasURL = nil
             showArtworkOverlay = false
+            if let localCanvas = library.canvasURL(track) {
+                canvasURL = localCanvas
+                return
+            }
             let state = await SpotifyCanvasService.load(for: track)
             if case .ready(let url) = state {
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.5)) {

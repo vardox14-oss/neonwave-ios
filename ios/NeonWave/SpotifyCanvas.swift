@@ -98,6 +98,7 @@ struct LoopingCanvasVideo: UIViewRepresentable {
 }
 
 struct SpotifyCanvasView: View {
+    @EnvironmentObject private var library: LibraryStore
     let track: Track
     let isPlaying: Bool
     @State private var state: SpotifyCanvasState = .loading
@@ -144,6 +145,10 @@ struct SpotifyCanvasView: View {
         .clipShape(RoundedRectangle(cornerRadius: 28))
         .overlay(RoundedRectangle(cornerRadius: 28).stroke(.white.opacity(0.08)))
         .task(id: "\(track.id)-\(reloadID.uuidString)") {
+            if let local = library.canvasURL(track) {
+                state = .ready(local)
+                return
+            }
             state = .loading
             state = await SpotifyCanvasService.load(for: track)
         }

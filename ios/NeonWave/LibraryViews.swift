@@ -31,7 +31,7 @@ struct TrackRow: View {
             }.buttonStyle(.plain).accessibilityLabel("Écouter \(track.title), \(track.artist)")
             if let progress = downloads.progress[track.id] {
                 Button { downloads.cancel(track.id) } label: { ProgressView(value: progress).progressViewStyle(.circular).frame(width: 30) }.accessibilityLabel("Annuler le téléchargement")
-            } else if library.localURL(track) == nil && (track.remoteID != nil || track.streamURL != nil) {
+            } else if library.localURL(track) == nil && track.canDownload {
                 IconButton(symbol: "arrow.down.circle", label: "Télécharger \(track.title)") { downloads.download(track) }.foregroundStyle(NW.blue)
             }
             Menu {
@@ -45,7 +45,7 @@ struct TrackRow: View {
                     ForEach(library.playlists) { item in Button(item.name) { library.add(track, to: item) } }
                 }
                 if let playlist { Button("Retirer de cette playlist", systemImage: "minus.circle") { library.remove(track, from: playlist) } }
-                if track.remoteID != nil && library.localURL(track) != nil {
+                if track.isDownloadedSource && library.localURL(track) != nil {
                     Button("Retirer le téléchargement", systemImage: "arrow.down.circle", role: .destructive) {
                         if player.current?.id == track.id { player.stop() }; library.removeDownload(track)
                     }
@@ -107,7 +107,7 @@ struct TrackCollectionView: View {
                         let available = tracks.filter { library.localURL($0) != nil }
                         if let first = available.randomElement() { player.shuffle = true; player.play(first, in: available) }
                     }.background(NW.surface, in: RoundedRectangle(cornerRadius: 16))
-                    if tracks.contains(where: { $0.remoteID != nil && library.localURL($0) == nil }) {
+                    if tracks.contains(where: { $0.canDownload && library.localURL($0) == nil }) {
                         IconButton(symbol: "arrow.down.circle", label: "Télécharger cette playlist") { tracks.forEach(downloads.download) }
                     }
                 }
@@ -546,13 +546,13 @@ struct DownloadsView: View {
                         }
                     }
                 }
-                let pending = library.tracks.filter { $0.remoteID != nil && library.localURL($0) == nil }
+                let pending = library.tracks.filter { $0.canDownload && library.localURL($0) == nil }
                 if !pending.isEmpty {
                     HStack { SectionHeading(title: "À emporter"); Button("Tout télécharger") { pending.forEach(downloads.download) }.font(.caption.bold()) }
                     ForEach(pending) { TrackRow(track: $0) }
                 }
                 if library.downloaded.isEmpty {
-                    EmptyLibrary(symbol: "arrow.down.circle", title: "La musique, même sans réseau.", description: "Importez vos fichiers ou téléchargez vos titres personnels depuis votre compte.", actionTitle: "Importer des fichiers", action: importFiles)
+                    EmptyLibrary(symbol: "arrow.down.circle", title: "La musique, même sans réseau.", description: "Téléchargez un titre depuis Recherche ou importez vos propres fichiers audio.", actionTitle: "Importer des fichiers", action: importFiles)
                 } else {
                     SectionHeading(title: "Disponibles hors connexion")
                     LazyVStack(spacing: 2) { ForEach(library.downloaded) { TrackRow(track: $0, context: library.downloaded) } }
