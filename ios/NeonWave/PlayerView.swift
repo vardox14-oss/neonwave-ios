@@ -127,7 +127,6 @@ struct PlayerView: View {
                             .black.opacity(0.80),
                             NW.background
                         ],
-                        stops: [0.0, 0.22, 0.55, 0.82, 1.0],
                         startPoint: .top,
                         endPoint: .bottom
                     )
