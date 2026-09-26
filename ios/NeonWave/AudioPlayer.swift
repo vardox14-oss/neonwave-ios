@@ -2,6 +2,67 @@ import SwiftUI
 import AVFoundation
 import MediaPlayer
 
+private final class SilentAudioKeepAlive {
+    static let shared = SilentAudioKeepAlive()
+    private var audioPlayer: AVAudioPlayer?
+
+    private init() {
+        if let data = Self.createSilentWavData() {
+            audioPlayer = try? AVAudioPlayer(data: data)
+            audioPlayer?.numberOfLoops = -1
+            audioPlayer?.volume = 0.01
+            audioPlayer?.prepareToPlay()
+        }
+    }
+
+    func start() {
+        audioPlayer?.play()
+    }
+
+    func pause() {
+        audioPlayer?.pause()
+    }
+
+    func stop() {
+        audioPlayer?.stop()
+        audioPlayer?.currentTime = 0
+    }
+
+    private static func createSilentWavData() -> Data? {
+        let sampleRate: UInt32 = 44100
+        let channels: UInt16 = 1
+        let bitsPerSample: UInt16 = 16
+        let numSamples: UInt32 = 44100
+        let subchunk2Size = numSamples * UInt32(channels) * UInt32(bitsPerSample / 8)
+        let chunkSize = 36 + subchunk2Size
+
+        var data = Data()
+        data.append(contentsOf: "RIFF".utf8)
+        var cSize = chunkSize.littleEndian
+        data.append(Data(bytes: &cSize, count: MemoryLayout<UInt32>.size))
+        data.append(contentsOf: "WAVEfmt ".utf8)
+        var sc1Size: UInt32 = 16.littleEndian
+        data.append(Data(bytes: &sc1Size, count: MemoryLayout<UInt32>.size))
+        var formatTag: UInt16 = 1.littleEndian
+        data.append(Data(bytes: &formatTag, count: MemoryLayout<UInt16>.size))
+        var ch = channels.littleEndian
+        data.append(Data(bytes: &ch, count: MemoryLayout<UInt16>.size))
+        var sr = sampleRate.littleEndian
+        data.append(Data(bytes: &sr, count: MemoryLayout<UInt32>.size))
+        var br = (sampleRate * UInt32(channels) * UInt32(bitsPerSample / 8)).littleEndian
+        data.append(Data(bytes: &br, count: MemoryLayout<UInt32>.size))
+        var ba = (channels * (bitsPerSample / 8)).littleEndian
+        data.append(Data(bytes: &ba, count: MemoryLayout<UInt16>.size))
+        var bps = bitsPerSample.littleEndian
+        data.append(Data(bytes: &bps, count: MemoryLayout<UInt16>.size))
+        data.append(contentsOf: "data".utf8)
+        var sc2Size = subchunk2Size.littleEndian
+        data.append(Data(bytes: &sc2Size, count: MemoryLayout<UInt32>.size))
+        data.append(Data(count: Int(subchunk2Size)))
+        return data
+    }
+}
+
 @MainActor final class AudioPlayer: ObservableObject {
     @Published private(set) var current: Track?
     @Published private(set) var queue: [Track] = []
@@ -20,6 +81,8 @@ import MediaPlayer
     @Published private(set) var loadingLyrics = false
 
     private let player = AVPlayer()
+    private var isYouTubeActive = false
+    private var resolveTask: Task<Void, Never>?
     private var timeObserver: Any?
     private var statusObserver: NSKeyValueObservation?
     private var playbackObserver: NSKeyValueObservation?
@@ -34,7 +97,7 @@ import MediaPlayer
     init() {
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.25, preferredTimescale: 600), queue: .main) { [weak self] time in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, !self.isYouTubeActive else { return }
                 self.elapsed = time.seconds.isFinite ? time.seconds : 0
                 let length = self.player.currentItem?.duration.seconds ?? 0
                 if length.isFinite && length > 0 { self.duration = length }
@@ -45,11 +108,14 @@ import MediaPlayer
             }
         }
         playbackObserver = player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
-            Task { @MainActor in self?.isPlaying = self?.player.timeControlStatus == .playing }
+            Task { @MainActor in
+                guard let self, !self.isYouTubeActive else { return }
+                self.isPlaying = self.player.timeControlStatus == .playing
+            }
         }
         observers.append(NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: nil, queue: .main) { [weak self] notification in
             Task { @MainActor in
-                guard let self, let ended = notification.object as? AVPlayerItem, ended === self.player.currentItem else { return }
+                guard let self, !self.isYouTubeActive, let ended = notification.object as? AVPlayerItem, ended === self.player.currentItem else { return }
                 self.next(automatic: true)
             }
         })
@@ -66,6 +132,9 @@ import MediaPlayer
             let reason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
             if reason == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue { Task { @MainActor in self?.pause() } }
         })
+
+        setupYouTubeCallbacks()
+
         let commands = MPRemoteCommandCenter.shared()
         commands.playCommand.addTarget { [weak self] _ in Task { @MainActor in self?.resume() }; return .success }
         commands.pauseCommand.addTarget { [weak self] _ in Task { @MainActor in self?.pause() }; return .success }
@@ -77,7 +146,55 @@ import MediaPlayer
         }
     }
 
+    private func setupYouTubeCallbacks() {
+        YouTubePlayer.shared.onTimeUpdate = { [weak self] cur, dur in
+            Task { @MainActor in
+                guard let self, self.isYouTubeActive else { return }
+                self.elapsed = cur
+                if dur > 0 && (self.duration == 0 || self.duration < 40 || dur > self.duration) {
+                    self.duration = dur
+                }
+                if !self.lyrics.isEmpty {
+                    self.activeLyricIndex = self.lyrics.lastIndex(where: { $0.time <= self.elapsed })
+                }
+                self.updateNowPlaying()
+            }
+        }
+
+        YouTubePlayer.shared.onStateChange = { [weak self] playing in
+            Task { @MainActor in
+                guard let self, self.isYouTubeActive else { return }
+                self.isPlaying = playing
+                self.updateNowPlaying()
+            }
+        }
+
+        YouTubePlayer.shared.onEnded = { [weak self] in
+            Task { @MainActor in
+                guard let self, self.isYouTubeActive else { return }
+                self.next(automatic: true)
+            }
+        }
+
+        YouTubePlayer.shared.onError = { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.isYouTubeActive, let cur = self.current else { return }
+                if let stream = cur.streamURL, let url = URL(string: stream) {
+                    self.startAVPlayerFallback(url: url)
+                }
+            }
+        }
+    }
+
     func connect(_ library: LibraryStore) { self.library = library }
+
+    func isPlayable(_ track: Track) -> Bool {
+        if library?.localURL(track) != nil { return true }
+        if track.videoId != nil { return true }
+        if track.streamURL != nil { return true }
+        if !track.title.isEmpty { return true }
+        return false
+    }
 
     func playableURL(for track: Track) -> URL? {
         if let local = library?.localURL(track) { return local }
@@ -91,7 +208,7 @@ import MediaPlayer
             return
         }
         let list = tracks ?? [track]
-        let playable = list.filter { playableURL(for: $0) != nil }
+        let playable = list.filter { isPlayable($0) }
         guard !playable.isEmpty, let target = playable.first(where: { $0.id == track.id }) ?? playable.first else {
             error = "Source audio introuvable pour ce titre."; return
         }
@@ -101,10 +218,75 @@ import MediaPlayer
     }
 
     private func loadCurrent() {
-        guard queue.indices.contains(index), let url = playableURL(for: queue[index]) else { stop(); return }
+        guard queue.indices.contains(index) else { stop(); return }
+        let target = queue[index]
+        resolveTask?.cancel()
+
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
         try? AVAudioSession.sharedInstance().setActive(true)
-        current = queue[index]; elapsed = 0; duration = current?.duration ?? 0
+        current = target; elapsed = 0; duration = target.duration
+
+        fetchLyricsForCurrent()
+        updateNowPlaying(includeArtwork: true)
+
+        // 1. If downloaded / imported locally, use native AVPlayer
+        if let localURL = library?.localURL(target) {
+            isYouTubeActive = false
+            SilentAudioKeepAlive.shared.stop()
+            YouTubePlayer.shared.stop()
+
+            let item = AVPlayerItem(url: localURL)
+            statusObserver = item.observe(\.status, options: [.new]) { [weak self] item, _ in
+                if item.status == .failed { Task { @MainActor in self?.error = "Ce fichier audio ne peut pas être lu."; self?.pause() } }
+            }
+            player.replaceCurrentItem(with: item)
+            player.automaticallyWaitsToMinimizeStalling = true
+            player.playImmediately(atRate: 1.0)
+            isPlaying = true
+            library?.recordPlay(target)
+            return
+        }
+
+        // 2. Online track: resolve YouTube full song
+        isYouTubeActive = true
+        player.replaceCurrentItem(with: nil) // Stop AVPlayer preview
+
+        if let existingVid = target.videoId, !existingVid.isEmpty {
+            startYouTubePlayback(videoId: existingVid)
+        } else {
+            resolveTask = Task { [weak self] in
+                guard let self else { return }
+                let vid = await MusicCatalogService.resolveYouTubeId(title: target.title, artist: target.artist)
+                Task { @MainActor in
+                    guard self.current?.id == target.id else { return }
+                    if let vid {
+                        if self.queue.indices.contains(self.index) {
+                            self.queue[self.index].videoId = vid
+                        }
+                        self.startYouTubePlayback(videoId: vid)
+                    } else if let stream = target.streamURL, let url = URL(string: stream) {
+                        self.startAVPlayerFallback(url: url)
+                    } else {
+                        self.error = "Impossible de charger ce titre."
+                        self.pause()
+                    }
+                }
+            }
+        }
+    }
+
+    private func startYouTubePlayback(videoId: String) {
+        isYouTubeActive = true
+        SilentAudioKeepAlive.shared.start()
+        YouTubePlayer.shared.playVideo(videoId)
+        isPlaying = true
+        updateNowPlaying(includeArtwork: true)
+    }
+
+    private func startAVPlayerFallback(url: URL) {
+        isYouTubeActive = false
+        SilentAudioKeepAlive.shared.stop()
+        YouTubePlayer.shared.stop()
         let item = AVPlayerItem(url: url)
         statusObserver = item.observe(\.status, options: [.new]) { [weak self] item, _ in
             if item.status == .failed { Task { @MainActor in self?.error = "Ce flux audio ne peut pas être lu."; self?.pause() } }
@@ -112,10 +294,7 @@ import MediaPlayer
         player.replaceCurrentItem(with: item)
         player.automaticallyWaitsToMinimizeStalling = true
         player.playImmediately(atRate: 1.0)
-        if let library, library.localURL(queue[index]) != nil {
-            library.recordPlay(queue[index])
-        }
-        fetchLyricsForCurrent()
+        isPlaying = true
         updateNowPlaying(includeArtwork: true)
     }
 
@@ -137,17 +316,48 @@ import MediaPlayer
     }
 
     func toggle() { isPlaying ? pause() : resume() }
-    func pause() { player.pause(); isPlaying = false; updateNowPlaying() }
+
+    func pause() {
+        if isYouTubeActive {
+            YouTubePlayer.shared.pause()
+            SilentAudioKeepAlive.shared.pause()
+        } else {
+            player.pause()
+        }
+        isPlaying = false
+        updateNowPlaying()
+    }
+
     func resume() {
         guard current != nil else { return }
-        do { try AVAudioSession.sharedInstance().setActive(true); player.play() }
-        catch { self.error = "Impossible de reprendre la lecture." }
+        do {
+            try AVAudioSession.sharedInstance().setActive(true)
+            if isYouTubeActive {
+                SilentAudioKeepAlive.shared.start()
+                YouTubePlayer.shared.resume()
+            } else {
+                player.play()
+            }
+            isPlaying = true
+            updateNowPlaying()
+        } catch {
+            self.error = "Impossible de reprendre la lecture."
+        }
     }
 
     func seek(_ seconds: Double) {
         guard seconds.isFinite else { return }
-        player.seek(to: CMTime(seconds: min(max(0, seconds), duration), preferredTimescale: 600)); elapsed = seconds
-        if !lyrics.isEmpty { activeLyricIndex = lyrics.lastIndex(where: { $0.time <= seconds }) }
+        let targetTime = min(max(0, seconds), duration > 0 ? duration : seconds)
+        elapsed = targetTime
+        if isYouTubeActive {
+            YouTubePlayer.shared.seek(to: targetTime)
+        } else {
+            player.seek(to: CMTime(seconds: targetTime, preferredTimescale: 600))
+        }
+        if !lyrics.isEmpty {
+            activeLyricIndex = lyrics.lastIndex(where: { $0.time <= targetTime })
+        }
+        updateNowPlaying()
     }
 
     func next(automatic: Bool = false) {
@@ -170,7 +380,7 @@ import MediaPlayer
     }
 
     func enqueue(_ track: Track) {
-        guard playableURL(for: track) != nil else { error = "Source audio introuvable."; return }
+        guard isPlayable(track) else { error = "Source audio introuvable."; return }
         if current == nil { play(track) } else { queue.append(track) }
     }
 
@@ -188,17 +398,33 @@ import MediaPlayer
     }
 
     func stop() {
-        pause(); player.replaceCurrentItem(with: nil); current = nil; queue = []; elapsed = 0; duration = 0
-        lyrics = []; plainLyrics = nil; activeLyricIndex = nil
-        setSleep(minutes: nil); MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        resolveTask?.cancel()
+        if isYouTubeActive {
+            YouTubePlayer.shared.stop()
+            SilentAudioKeepAlive.shared.stop()
+        }
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+        isYouTubeActive = false
+        current = nil
+        queue = []
+        elapsed = 0
+        duration = 0
+        lyrics = []
+        plainLyrics = nil
+        activeLyricIndex = nil
+        setSleep(minutes: nil)
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
     private func updateNowPlaying(includeArtwork: Bool = false) {
         guard let current else { return }
         var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
-        info[MPMediaItemPropertyTitle] = current.title; info[MPMediaItemPropertyArtist] = current.artist
-        info[MPMediaItemPropertyPlaybackDuration] = duration; info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = elapsed
+        info[MPMediaItemPropertyTitle] = current.title
+        info[MPMediaItemPropertyArtist] = current.artist
+        info[MPMediaItemPropertyPlaybackDuration] = duration
+        info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = elapsed
         info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
         if includeArtwork {
             info.removeValue(forKey: MPMediaItemPropertyArtwork)

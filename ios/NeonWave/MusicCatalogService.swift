@@ -166,4 +166,40 @@ enum MusicCatalogService {
         } catch { }
         return []
     }
+
+    private static var ytCache: [String: String] = [:]
+
+    static func resolveYouTubeId(title: String, artist: String) async -> String? {
+        let key = "\(artist.lowercased())|\(title.lowercased())"
+        if let cached = ytCache[key] { return cached }
+
+        let cleanTitle = title
+            .replacingOccurrences(of: "(feat.", with: "")
+            .replacingOccurrences(of: "(ft.", with: "")
+            .replacingOccurrences(of: "feat.", with: "")
+            .replacingOccurrences(of: "ft.", with: "")
+        let query = "\(artist) \(cleanTitle)".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        guard let url = URL(string: "https://www.youtube.com/results?search_query=\(query)") else { return nil }
+
+        var request = URLRequest(url: url)
+        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
+        request.timeoutInterval = 8
+
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            guard let html = String(data: data, encoding: .utf8) else { return nil }
+            let pattern = "\"videoId\":\"([A-Za-z0-9_-]{11})\""
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+            let ns = html as NSString
+            let matches = regex.matches(in: html, range: NSRange(location: 0, length: min(ns.length, 120_000)))
+            for match in matches {
+                if match.numberOfRanges > 1 {
+                    let vid = ns.substring(with: match.range(at: 1))
+                    ytCache[key] = vid
+                    return vid
+                }
+            }
+        } catch { }
+        return nil
+    }
 }

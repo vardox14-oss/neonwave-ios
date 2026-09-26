@@ -57,6 +57,12 @@ struct MainView: View {
         .overlay(alignment: .top) {
             if library.importing { Label("Import de vos titres…", systemImage: "waveform").font(.caption.bold()).padding(14).background(.ultraThinMaterial, in: Capsule()).padding(.top, 55) }
         }
+        .overlay(alignment: .bottomTrailing) {
+            YouTubePlayerWebView()
+                .frame(width: 1, height: 1)
+                .opacity(0.01)
+                .allowsHitTesting(false)
+        }
         .fullScreenCover(isPresented: $showPlayer) { PlayerView() }
         .sheet(isPresented: $showSettings) { SettingsView() }
     }
