@@ -68,6 +68,14 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(choice.duration, 158)
     }
 
+    func testLyricsCandidatePrefersSyncedOverPlain() throws {
+        let plain = LyricsService.LRCLIBResponse(trackName: "Le bonheur est triste", artistName: "Saïf", duration: 155, plainLyrics: "Texte brut", syncedLyrics: nil)
+        let synced = LyricsService.LRCLIBResponse(trackName: "Le bonheur est triste", artistName: "Saif, Pato", duration: 155, plainLyrics: "Texte brut", syncedLyrics: "[00:18.98]Texte synchronisé")
+        let choice = try XCTUnwrap(LyricsService.bestCandidate([plain, synced], title: "Le bonheur est triste", artist: "Saïf", duration: 155))
+        XCTAssertEqual(choice.artistName, "Saif, Pato")
+        XCTAssertNotNil(choice.syncedLyrics)
+    }
+
     func testYouTubeResolverPrefersMatchingStudioAudio() throws {
         let live = MusicCatalogService.YouTubeCandidate(videoId: "AAAAAAAAAAA", title: "Ainsi va la rue (Live)", channel: "Concert TV", duration: 158)
         let studio = MusicCatalogService.YouTubeCandidate(videoId: "BBBBBBBBBBB", title: "Rim'K - Ainsi va la rue (Official Audio)", channel: "Rim'K - Topic", duration: 158)

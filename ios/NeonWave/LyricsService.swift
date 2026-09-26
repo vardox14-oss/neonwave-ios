@@ -16,6 +16,28 @@ enum LyricsService {
     }
 
     static func fetchLyrics(title: String, artist: String, duration: Double? = nil) async -> LyricsResult {
+        let primaryResult = await queryLRCLIB(title: title, artist: artist, duration: duration)
+        if !primaryResult.lines.isEmpty {
+            return primaryResult
+        }
+
+        let cleanedT = cleanTitle(title)
+        let cleanedA = cleanArtist(artist)
+        if cleanedT != title || cleanedA != artist {
+            let fallbackResult = await queryLRCLIB(title: cleanedT, artist: cleanedA, duration: duration)
+            if !fallbackResult.lines.isEmpty {
+                return fallbackResult
+            }
+            if primaryResult.plain != nil {
+                return primaryResult
+            }
+            return fallbackResult
+        }
+
+        return primaryResult
+    }
+
+    private static func queryLRCLIB(title: String, artist: String, duration: Double? = nil) async -> LyricsResult {
         var components = URLComponents(string: "https://lrclib.net/api/search")!
         components.queryItems = [
             URLQueryItem(name: "track_name", value: title),
@@ -46,12 +68,44 @@ enum LyricsService {
         }
     }
 
+    static func cleanTitle(_ title: String) -> String {
+        var cleaned = title
+        let patterns = [
+            #"\s*[\(\[](?:clip|officiel|official|audio|video|lyrics?|paroles|version|remix|hd|4k|feat\.?|ft\.).*?[\)\]]"#,
+            #"\s*-\s*(?:clip|officiel|official|audio|video|lyrics?|paroles).*$"#
+        ]
+        for pattern in patterns {
+            cleaned = cleaned.replacingOccurrences(of: pattern, with: "", options: [.regularExpression, .caseInsensitive])
+        }
+        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func cleanArtist(_ artist: String) -> String {
+        let parts = artist.components(separatedBy: CharacterSet(charactersIn: ",&/"))
+        let first = parts.first ?? artist
+        let featCleaned = first.replacingOccurrences(of: #"(?i)\s+(?:feat\.?|ft\.?).*$"#, with: "", options: .regularExpression)
+        return featCleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     static func bestCandidate(_ candidates: [LRCLIBResponse], title: String, artist: String, duration: Double?) -> LRCLIBResponse? {
         let wantedTitle = normalized(title)
         let wantedArtist = normalized(artist)
-        return candidates
-            .filter { !($0.syncedLyrics ?? "").isEmpty || !($0.plainLyrics ?? "").isEmpty }
-            .max { score($0, title: wantedTitle, artist: wantedArtist, duration: duration) < score($1, title: wantedTitle, artist: wantedArtist, duration: duration) }
+        let valid = candidates.filter { !($0.syncedLyrics ?? "").isEmpty || !($0.plainLyrics ?? "").isEmpty }
+        guard !valid.isEmpty else { return nil }
+
+        // ALWAYS prioritize candidates with synced lyrics: karaoke/synchronized experience is primary!
+        let synced = valid.filter { !($0.syncedLyrics ?? "").isEmpty }
+        if !synced.isEmpty {
+            return synced.max {
+                score($0, title: wantedTitle, artist: wantedArtist, duration: duration) <
+                score($1, title: wantedTitle, artist: wantedArtist, duration: duration)
+            }
+        }
+
+        return valid.max {
+            score($0, title: wantedTitle, artist: wantedArtist, duration: duration) <
+            score($1, title: wantedTitle, artist: wantedArtist, duration: duration)
+        }
     }
 
     private static func score(_ candidate: LRCLIBResponse, title: String, artist: String, duration: Double?) -> Double {
@@ -63,8 +117,17 @@ enum LyricsService {
         let titleTokens = Set(title.split(separator: " ").map(String.init).filter { $0.count > 1 })
         let candidateTokens = Set(candidateTitle.split(separator: " ").map(String.init))
         if !titleTokens.isEmpty { value += 45 * Double(titleTokens.intersection(candidateTokens).count) / Double(titleTokens.count) }
+
         if candidateArtist == artist { value += 65 }
-        else if candidateArtist.contains(artist) || artist.contains(candidateArtist) { value += 35 }
+        else if candidateArtist.contains(artist) || artist.contains(candidateArtist) { value += 50 }
+        else {
+            let artistTokens = Set(artist.split(separator: " ").map(String.init).filter { $0.count > 1 })
+            let candArtistTokens = Set(candidateArtist.split(separator: " ").map(String.init))
+            if !artistTokens.isEmpty && !artistTokens.intersection(candArtistTokens).isEmpty {
+                value += 40
+            }
+        }
+
         if let duration, duration > 0, let candidateDuration = candidate.duration, candidateDuration > 0 {
             let delta = abs(duration - candidateDuration)
             if delta <= 1.5 { value += 70 }
@@ -72,7 +135,7 @@ enum LyricsService {
             else if delta <= 9 { value += 28 }
             else if delta > 20 { value -= min(80, delta) }
         }
-        if !((candidate.syncedLyrics ?? "").isEmpty) { value += 12 }
+        if !((candidate.syncedLyrics ?? "").isEmpty) { value += 150 }
         return value
     }
 
