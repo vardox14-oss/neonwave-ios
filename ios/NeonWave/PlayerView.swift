@@ -466,6 +466,7 @@ struct LyricsView: View {
                     .shadow(color: .black.opacity(0.35), radius: 8, y: 4)
                     .padding(.top, 4)
                     .padding(.trailing, 8)
+                }
             }
             .onAppear {
                 if let value = player.activeLyricIndex {
