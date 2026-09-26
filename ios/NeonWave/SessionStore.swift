@@ -36,6 +36,21 @@ import Security
         busy = true; error = nil
         defer { busy = false }
         do {
+            if AppConfiguration.apiURL == nil {
+                let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                let chosenName: String
+                if let u = username?.trimmingCharacters(in: .whitespacesAndNewlines), !u.isEmpty {
+                    chosenName = u
+                } else {
+                    let fallback = trimmedEmail.components(separatedBy: "@").first ?? "Vardox"
+                    chosenName = fallback.prefix(1).uppercased() + fallback.dropFirst()
+                }
+                let localID = "local-" + Data(trimmedEmail.utf8).base64URLEncoded.prefix(12)
+                let localAccount = Account(id: String(localID), username: chosenName, email: trimmedEmail, role: "user")
+                let localResponse = AuthResponse(token: "local-token-" + UUID().uuidString, user: localAccount)
+                try accept(localResponse)
+                return
+            }
             var body: [String: Any] = ["email": email.trimmingCharacters(in: .whitespacesAndNewlines), "password": password, "rememberMe": true]
             if let username { body["username"] = username }
             let result: AuthResponse = try await api.call(username == nil ? "api/auth/login" : "api/auth/register", method: "POST", body: body, authenticated: false)
@@ -102,6 +117,7 @@ import Security
         account = nil; isGuest = false; UserDefaults.standard.set(false, forKey: "localMode")
     }
     func deleteAccount() async throws {
+        guard AppConfiguration.apiURL != nil else { return }
         struct Result: Decodable { let success: Bool }
         let _: Result = try await api.call("api/ios/account", method: "DELETE")
     }

@@ -126,7 +126,7 @@ import UniformTypeIdentifiers
         message = "\(imported) titre\(imported > 1 ? "s" : "") importé\(imported > 1 ? "s" : "")\(failures > 0 ? ". \(failures) fichier(s) non lisible(s)." : ". Prêt pour le mode avion.")"
     }
     func sync() async {
-        guard !syncing else { return }
+        guard !syncing, AppConfiguration.apiURL != nil else { return }
         syncing = true; let owner = userID
         defer { syncing = false }
         do {
@@ -144,6 +144,7 @@ import UniformTypeIdentifiers
     }
     func upload(_ track: Track) async {
         guard let url = localURL(track), track.remoteID == nil, !uploading.contains(track.id) else { return }
+        guard AppConfiguration.apiURL != nil else { message = "La sauvegarde en ligne sera disponible après configuration du serveur distant."; return }
         let mimeTypes = ["mp3": "audio/mpeg", "m4a": "audio/mp4", "wav": "audio/wav", "flac": "audio/flac"]
         guard let mime = mimeTypes[url.pathExtension.lowercased()] else { message = "La sauvegarde serveur prend en charge les fichiers MP3, M4A, WAV et FLAC. Ce titre reste disponible sur cet iPhone."; return }
         let owner = userID
