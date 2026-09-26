@@ -100,7 +100,10 @@ enum ArtistDiscoveryService {
         guard AppConfiguration.apiURL != nil else {
             return MusicTasteStore.featuredNames.map { ArtistChoice(name: $0) }
         }
-        let response: ArtistResponse? = try? await APIClient().call("api/spotify/artists/defaults")
+        let response: ArtistResponse? = try? await APIClient().call(
+            "api/spotify/artists/defaults",
+            authenticated: false
+        )
         guard let items = response?.items.filter({ !$0.spotifyId.isEmpty && $0.source == "spotify" }), !items.isEmpty else {
             return MusicTasteStore.featuredNames.map { ArtistChoice(name: $0) }
         }
@@ -114,6 +117,7 @@ enum ArtistDiscoveryService {
         if AppConfiguration.apiURL != nil {
             let response: ArtistResponse? = try? await APIClient().call(
                 "api/spotify/search-artists",
+                authenticated: false,
                 queryItems: [.init(name: "q", value: value)]
             )
             return response?.items.filter { !$0.spotifyId.isEmpty && $0.source == "spotify" } ?? []
