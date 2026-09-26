@@ -39,10 +39,21 @@ final class DownloadManager: NSObject, ObservableObject, URLSessionDownloadDeleg
         }
     }
     @MainActor func download(_ track: Track) {
-        guard let library, let remoteID = track.remoteID, library.localURL(track) == nil, progress[track.id] == nil else { return }
+        guard let library, library.localURL(track) == nil, progress[track.id] == nil else { return }
+        library.addTrackIfMissing(track)
         do {
-            var request = try APIClient().request("api/user/local-tracks/\(remoteID)/stream")
-            request.allowsCellularAccess = !library.snapshot.wifiOnly
+            let request: URLRequest
+            if let stream = track.streamURL, let url = URL(string: stream) {
+                var req = URLRequest(url: url)
+                req.allowsCellularAccess = !library.snapshot.wifiOnly
+                request = req
+            } else if let remoteID = track.remoteID {
+                var req = try APIClient().request("api/user/local-tracks/\(remoteID)/stream")
+                req.allowsCellularAccess = !library.snapshot.wifiOnly
+                request = req
+            } else {
+                return
+            }
             let info = DownloadInfo(trackID: track.id, userID: library.userID, destination: library.downloadDestination(track))
             let task = session.downloadTask(with: request)
             task.taskDescription = String(data: try JSONEncoder().encode(info), encoding: .utf8)
@@ -72,9 +83,8 @@ final class DownloadManager: NSObject, ObservableObject, URLSessionDownloadDeleg
     }
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
         guard let info = Self.info(downloadTask) else { return }
-        guard let response = downloadTask.response as? HTTPURLResponse, [200, 206].contains(response.statusCode),
-              response.mimeType?.hasPrefix("audio/") == true else {
-            Task { @MainActor in self.progress[info.trackID] = nil; self.error = "Téléchargement refusé. Reconnectez-vous puis réessayez." }; return
+        guard let response = downloadTask.response as? HTTPURLResponse, [200, 206].contains(response.statusCode) else {
+            Task { @MainActor in self.progress[info.trackID] = nil; self.error = "Téléchargement impossible. Réessayez." }; return
         }
         do {
             // URLSession deletes the temporary file when this callback returns.

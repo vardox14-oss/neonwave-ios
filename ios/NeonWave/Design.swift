@@ -31,28 +31,42 @@ struct CoverArt: View {
     var index = 0
     var symbol: String? = nil
     var imageURL: URL? = nil
+    var remoteURL: String? = nil
     var radius: CGFloat = 20
     var body: some View {
         GeometryReader { geo in
             ZStack {
                 if let imageURL, let image = UIImage(contentsOfFile: imageURL.path) {
                     Image(uiImage: image).resizable().scaledToFill()
-                } else {
-                    let colors = NW.colors[(track?.colorIndex ?? index) % NW.colors.count]
-                    LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
-                    Circle().stroke(.white.opacity(0.12), lineWidth: geo.size.width * 0.13)
-                        .frame(width: geo.size.width * 0.85).offset(x: geo.size.width * 0.18, y: geo.size.height * 0.16)
-                    Circle().stroke(.white.opacity(0.16), lineWidth: 1)
-                        .frame(width: geo.size.width * 0.64).offset(x: geo.size.width * 0.18, y: geo.size.height * 0.16)
-                    if let symbol {
-                        Image(systemName: symbol).font(.system(size: geo.size.width * 0.32, weight: .medium)).foregroundStyle(.white)
-                    } else {
-                        WaveMark(size: geo.size.width * 0.26).rotationEffect(.degrees(-12))
+                } else if let remote = (remoteURL ?? track?.artworkURL), let url = URL(string: remote) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image.resizable().scaledToFill()
+                        default:
+                            placeholder(geo: geo)
+                        }
                     }
+                } else {
+                    placeholder(geo: geo)
                 }
             }.frame(width: geo.size.width, height: geo.size.height).clipped()
         }.aspectRatio(1, contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
             .accessibilityHidden(true)
+    }
+
+    @ViewBuilder private func placeholder(geo: GeometryProxy) -> some View {
+        let colors = NW.colors[(track?.colorIndex ?? index) % NW.colors.count]
+        LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
+        Circle().stroke(.white.opacity(0.12), lineWidth: geo.size.width * 0.13)
+            .frame(width: geo.size.width * 0.85).offset(x: geo.size.width * 0.18, y: geo.size.height * 0.16)
+        Circle().stroke(.white.opacity(0.16), lineWidth: 1)
+            .frame(width: geo.size.width * 0.64).offset(x: geo.size.width * 0.18, y: geo.size.height * 0.16)
+        if let symbol {
+            Image(systemName: symbol).font(.system(size: geo.size.width * 0.32, weight: .medium)).foregroundStyle(.white)
+        } else {
+            WaveMark(size: geo.size.width * 0.26).rotationEffect(.degrees(-12))
+        }
     }
 }
 

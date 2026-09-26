@@ -59,6 +59,12 @@ import UniformTypeIdentifiers
         guard !cleaned.isEmpty else { return }
         snapshot.playlists.insert(Playlist(name: String(cleaned.prefix(80))), at: 0); persist(); haptic()
     }
+    func addTrackIfMissing(_ track: Track) {
+        if !snapshot.tracks.contains(where: { $0.id == track.id }) {
+            snapshot.tracks.insert(track, at: 0)
+            persist()
+        }
+    }
     func renamePlaylist(_ playlist: Playlist, name: String) {
         guard let index = snapshot.playlists.firstIndex(where: { $0.id == playlist.id }), !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         snapshot.playlists[index].name = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80)); persist()

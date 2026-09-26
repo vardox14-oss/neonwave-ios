@@ -13,7 +13,7 @@ struct TrackRow: View {
         HStack(spacing: 12) {
             Button { player.play(track, in: context.isEmpty ? [track] : context) } label: {
                 HStack(spacing: 13) {
-                    CoverArt(track: track, imageURL: library.artworkURL(track), radius: 12).frame(width: 52, height: 52)
+                    CoverArt(track: track, imageURL: library.artworkURL(track), remoteURL: track.artworkURL, radius: 12).frame(width: 52, height: 52)
                     VStack(alignment: .leading, spacing: 5) {
                         Text(track.title).font(.subheadline.weight(.semibold)).foregroundStyle(player.current?.id == track.id ? NW.blue : .white).lineLimit(1)
                         HStack(spacing: 4) {
@@ -25,7 +25,7 @@ struct TrackRow: View {
             }.buttonStyle(PressStyle()).accessibilityLabel("Écouter \(track.title), \(track.artist)")
             if let progress = downloads.progress[track.id] {
                 Button { downloads.cancel(track.id) } label: { ProgressView(value: progress).progressViewStyle(.circular).frame(width: 30) }.accessibilityLabel("Annuler le téléchargement")
-            } else if library.localURL(track) == nil && track.remoteID != nil {
+            } else if library.localURL(track) == nil && (track.remoteID != nil || track.streamURL != nil) {
                 IconButton(symbol: "arrow.down.circle", label: "Télécharger \(track.title)") { downloads.download(track) }.foregroundStyle(NW.blue)
             }
             Menu {
@@ -219,31 +219,248 @@ struct PlaylistPickerView: View {
 
 struct SearchView: View {
     @EnvironmentObject private var library: LibraryStore
+    @EnvironmentObject private var player: AudioPlayer
+    @EnvironmentObject private var downloads: DownloadManager
     @State private var query = ""
     @State private var filter = 0
-    private var results: [Track] {
+    @State private var searching = false
+    @State private var searchTask: Task<Void, Never>?
+    @State private var onlineTracks: [Track] = []
+    @State private var onlineAlbums: [Album] = []
+    @State private var selectedAlbum: Album?
+
+    private var localResults: [Track] {
         library.tracks.filter { track in
             (query.isEmpty || track.title.localizedCaseInsensitiveContains(query) || track.artist.localizedCaseInsensitiveContains(query)) && (filter != 1 || library.snapshot.likedIDs.contains(track.id)) && (filter != 2 || library.localURL(track) != nil)
         }.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
     }
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 22) {
                 SectionHeading(title: "Retrouvez votre son.", eyebrow: "Recherche").padding(.top, 16)
                 HStack(spacing: 12) {
                     Image(systemName: "magnifyingglass").foregroundStyle(NW.muted)
-                    TextField("Un titre, un artiste…", text: $query).autocorrectionDisabled().submitLabel(.search)
-                    if !query.isEmpty { Button { query = "" } label: { Image(systemName: "xmark.circle.fill") }.accessibilityLabel("Effacer la recherche") }
-                }.padding(17).background(NW.surface, in: RoundedRectangle(cornerRadius: 17))
-                Picker("Filtrer les titres", selection: $filter) { Text("Tous").tag(0); Text("Favoris").tag(1); Text("Sur l’iPhone").tag(2) }.pickerStyle(.segmented)
-                if results.isEmpty {
-                    EmptyLibrary(symbol: "magnifyingglass", title: query.isEmpty ? "Votre prochaine découverte" : "Aucun titre trouvé", description: query.isEmpty ? "Retrouvez ici tous vos fichiers personnels. Importez votre musique depuis Bibliothèque." : "Essayez un autre titre ou le nom de l’artiste.")
-                } else {
-                    Text("\(results.count) TITRES DANS VOTRE BIBLIOTHÈQUE").font(.system(size: 9, weight: .bold)).tracking(1.5).foregroundStyle(NW.muted)
-                    LazyVStack(spacing: 2) { ForEach(results) { TrackRow(track: $0, context: results) } }
+                    TextField("Rechercher un titre, Saïf, un album…", text: $query)
+                        .autocorrectionDisabled()
+                        .submitLabel(.search)
+                        .onChange(of: query) { _, newValue in
+                            triggerSearch(newValue)
+                        }
+                    if !query.isEmpty {
+                        Button {
+                            query = ""
+                            onlineTracks = []
+                            onlineAlbums = []
+                        } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(NW.muted)
+                        }
+                        .accessibilityLabel("Effacer la recherche")
+                    }
                 }
-            }.padding(22)
-        }.scrollDismissesKeyboard(.interactively).scrollIndicators(.hidden)
+                .padding(17).background(NW.surface, in: RoundedRectangle(cornerRadius: 17))
+
+                Picker("Filtrer les titres", selection: $filter) {
+                    Text("En ligne").tag(0)
+                    Text("Favoris").tag(1)
+                    Text("Sur l’iPhone").tag(2)
+                }
+                .pickerStyle(.segmented)
+
+                if filter == 0 {
+                    if searching {
+                        HStack(spacing: 12) {
+                            ProgressView().tint(NW.blue)
+                            Text("Recherche dans le catalogue…").font(.subheadline).foregroundStyle(NW.muted)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 180)
+                    } else if query.trimmingCharacters(in: .whitespaces).isEmpty {
+                        VStack(spacing: 16) {
+                            EmptyLibrary(
+                                symbol: "sparkles",
+                                title: "Explorez tout le son",
+                                description: "Tapez le nom d’un artiste comme Saïf, Ninho ou un titre pour lancer l'écoute et afficher les paroles."
+                            )
+                        }
+                    } else if onlineTracks.isEmpty && onlineAlbums.isEmpty {
+                        EmptyLibrary(
+                            symbol: "magnifyingglass",
+                            title: "Aucun résultat pour « \(query) »",
+                            description: "Vérifiez l'orthographe ou essayez un autre mot-clé."
+                        )
+                    } else {
+                        if !onlineAlbums.isEmpty {
+                            SectionHeading(title: "Albums", eyebrow: "Découverte")
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 14) {
+                                    ForEach(onlineAlbums) { album in
+                                        Button {
+                                            selectedAlbum = album
+                                        } label: {
+                                            VStack(alignment: .leading, spacing: 8) {
+                                                CoverArt(index: 1, remoteURL: album.coverURL, radius: 14)
+                                                    .frame(width: 140, height: 140)
+                                                Text(album.title).font(.subheadline.bold()).foregroundStyle(.white).lineLimit(1)
+                                                Text(album.artist).font(.caption).foregroundStyle(NW.muted).lineLimit(1)
+                                                if let count = album.trackCount {
+                                                    Text("\(count) pistes").font(.caption2).foregroundStyle(NW.blue)
+                                                }
+                                            }
+                                            .frame(width: 140, alignment: .leading)
+                                        }
+                                        .buttonStyle(PressStyle())
+                                    }
+                                }
+                                .padding(.horizontal, 2)
+                            }
+                        }
+
+                        if !onlineTracks.isEmpty {
+                            SectionHeading(title: "Titres", eyebrow: "Catalogue")
+                            LazyVStack(spacing: 2) {
+                                ForEach(onlineTracks) { track in
+                                    TrackRow(track: track, context: onlineTracks)
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    if localResults.isEmpty {
+                        EmptyLibrary(
+                            symbol: filter == 1 ? "heart" : "arrow.down.circle",
+                            title: filter == 1 ? "Aucun coup de cœur" : "Aucun titre sur cet iPhone",
+                            description: filter == 1 ? "Ajoutez des titres en favoris pour les retrouver ici." : "Téléchargez des titres en ligne ou importez vos MP3 pour les écouter hors connexion."
+                        )
+                    } else {
+                        Text("\(localResults.count) TITRE\(localResults.count > 1 ? "S" : "")").font(.system(size: 9, weight: .bold)).tracking(1.5).foregroundStyle(NW.muted)
+                        LazyVStack(spacing: 2) {
+                            ForEach(localResults) { TrackRow(track: $0, context: localResults) }
+                        }
+                    }
+                }
+            }
+            .padding(22)
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .scrollIndicators(.hidden)
+        .sheet(item: $selectedAlbum) { album in
+            AlbumDetailView(album: album)
+        }
+    }
+
+    private func triggerSearch(_ q: String) {
+        let trimmed = q.trimmingCharacters(in: .whitespaces)
+        searchTask?.cancel()
+        guard !trimmed.isEmpty else {
+            onlineTracks = []; onlineAlbums = []; searching = false; return
+        }
+        searching = true
+        searchTask = Task {
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard !Task.isCancelled else { return }
+            async let tracks = MusicCatalogService.searchTracks(trimmed)
+            async let albums = MusicCatalogService.searchAlbums(trimmed)
+            let (t, a) = await (tracks, albums)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                self.onlineTracks = t
+                self.onlineAlbums = a
+                self.searching = false
+            }
+        }
+    }
+}
+
+struct AlbumDetailView: View {
+    let album: Album
+    @EnvironmentObject private var player: AudioPlayer
+    @EnvironmentObject private var library: LibraryStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var tracks: [Track] = []
+    @State private var loading = true
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 24) {
+                    CoverArt(index: 2, remoteURL: album.coverURL, radius: 24)
+                        .frame(width: 220, height: 220)
+                        .shadow(color: NW.blue.opacity(0.3), radius: 25, y: 15)
+                        .padding(.top, 16)
+
+                    VStack(spacing: 6) {
+                        Text(album.title).font(.system(.title2, design: .rounded, weight: .bold)).foregroundStyle(.white).multilineTextAlignment(.center)
+                        Text(album.artist).font(.subheadline).foregroundStyle(NW.muted)
+                        if let count = album.trackCount {
+                            Text("\(count) morceaux • NeonWave").font(.caption).foregroundStyle(NW.blue)
+                        }
+                    }
+
+                    if !tracks.isEmpty {
+                        PrimaryButton(title: "Écouter l’album", symbol: "play.fill") {
+                            if let first = tracks.first {
+                                player.play(first, in: tracks)
+                            }
+                        }
+                        .padding(.horizontal, 24)
+                    }
+
+                    if loading {
+                        ProgressView().tint(NW.blue).frame(height: 100)
+                    } else if tracks.isEmpty {
+                        Text("Aucune piste trouvée pour cet album.").font(.subheadline).foregroundStyle(NW.muted).padding()
+                    } else {
+                        VStack(spacing: 2) {
+                            ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
+                                HStack(spacing: 14) {
+                                    Text("\(index + 1)")
+                                        .font(.subheadline.monospacedDigit())
+                                        .foregroundStyle(NW.muted)
+                                        .frame(width: 24, alignment: .trailing)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(track.title)
+                                            .font(.subheadline.weight(.semibold))
+                                            .foregroundStyle(player.current?.id == track.id ? NW.blue : .white)
+                                            .lineLimit(1)
+                                        Text(track.duration.clockTime)
+                                            .font(.caption2.monospacedDigit())
+                                            .foregroundStyle(NW.muted)
+                                    }
+                                    Spacer()
+                                    Button {
+                                        player.play(track, in: tracks)
+                                    } label: {
+                                        Image(systemName: player.current?.id == track.id && player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                                            .font(.title3)
+                                            .foregroundStyle(NW.blue)
+                                    }
+                                }
+                                .padding(.horizontal, 22)
+                                .padding(.vertical, 8)
+                            }
+                        }
+                    }
+                }
+                .padding(.bottom, 30)
+            }
+            .background(NW.background)
+            .navigationTitle("Album")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Fermer") { dismiss() }
+                }
+            }
+            .task {
+                tracks = await MusicCatalogService.fetchAlbumTracks(
+                    albumId: album.id,
+                    albumTitle: album.title,
+                    artistName: album.artist,
+                    coverURL: album.coverURL
+                )
+                loading = false
+            }
+        }
     }
 }
 

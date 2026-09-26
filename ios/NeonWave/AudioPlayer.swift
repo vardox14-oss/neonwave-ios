@@ -12,24 +12,35 @@ import MediaPlayer
     @Published var repeatMode: RepeatMode = .off
     @Published private(set) var sleepUntil: Date?
     @Published var error: String?
+
+    // Paroles synchronisées (Karaoké)
+    @Published private(set) var lyrics: [LyricLine] = []
+    @Published private(set) var plainLyrics: String?
+    @Published private(set) var activeLyricIndex: Int?
+    @Published private(set) var loadingLyrics = false
+
     private let player = AVPlayer()
     private var timeObserver: Any?
     private var statusObserver: NSKeyValueObservation?
     private var playbackObserver: NSKeyValueObservation?
     private var observers: [NSObjectProtocol] = []
     private var sleepTask: Task<Void, Never>?
+    private var lyricsTask: Task<Void, Never>?
     private var index = 0
     private weak var library: LibraryStore?
     private var resumeAfterInterruption = false
     private var shuffleHistory: [Int] = []
 
     init() {
-        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.4, preferredTimescale: 600), queue: .main) { [weak self] time in
+        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.25, preferredTimescale: 600), queue: .main) { [weak self] time in
             Task { @MainActor in
                 guard let self else { return }
                 self.elapsed = time.seconds.isFinite ? time.seconds : 0
                 let length = self.player.currentItem?.duration.seconds ?? 0
                 if length.isFinite && length > 0 { self.duration = length }
+                if !self.lyrics.isEmpty {
+                    self.activeLyricIndex = self.lyrics.lastIndex(where: { $0.time <= self.elapsed })
+                }
                 self.updateNowPlaying()
             }
         }
@@ -65,17 +76,28 @@ import MediaPlayer
             Task { @MainActor in self?.seek(event.positionTime) }; return .success
         }
     }
+
     func connect(_ library: LibraryStore) { self.library = library }
+
+    func playableURL(for track: Track) -> URL? {
+        if let local = library?.localURL(track) { return local }
+        if let stream = track.streamURL, let url = URL(string: stream) { return url }
+        return nil
+    }
+
     func play(_ track: Track, in tracks: [Track]? = nil) {
-        guard let library, library.localURL(track) != nil else {
-            error = "Téléchargez d’abord ce titre pour l’écouter sur cet iPhone."; return
+        let list = tracks ?? [track]
+        let playable = list.filter { playableURL(for: $0) != nil }
+        guard !playable.isEmpty, let target = playable.first(where: { $0.id == track.id }) ?? playable.first else {
+            error = "Source audio introuvable pour ce titre."; return
         }
-        queue = (tracks ?? [track]).filter { library.localURL($0) != nil }
-        index = queue.firstIndex(where: { $0.id == track.id }) ?? 0
+        queue = playable
+        index = queue.firstIndex(where: { $0.id == target.id }) ?? 0
         shuffleHistory = []; loadCurrent()
     }
+
     private func loadCurrent() {
-        guard queue.indices.contains(index), let library, let url = library.localURL(queue[index]) else { stop(); return }
+        guard queue.indices.contains(index), let url = playableURL(for: queue[index]) else { stop(); return }
         do {
             try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, policy: .longFormAudio)
             try AVAudioSession.sharedInstance().setActive(true)
@@ -83,11 +105,34 @@ import MediaPlayer
         current = queue[index]; elapsed = 0; duration = current?.duration ?? 0
         let item = AVPlayerItem(url: url)
         statusObserver = item.observe(\.status, options: [.new]) { [weak self] item, _ in
-            if item.status == .failed { Task { @MainActor in self?.error = "Ce fichier audio ne peut pas être lu."; self?.pause() } }
+            if item.status == .failed { Task { @MainActor in self?.error = "Ce flux audio ne peut pas être lu."; self?.pause() } }
         }
         player.replaceCurrentItem(with: item)
-        player.play(); library.recordPlay(queue[index]); updateNowPlaying(includeArtwork: true)
+        player.play()
+        if let library, library.localURL(queue[index]) != nil {
+            library.recordPlay(queue[index])
+        }
+        fetchLyricsForCurrent()
+        updateNowPlaying(includeArtwork: true)
     }
+
+    private func fetchLyricsForCurrent() {
+        lyricsTask?.cancel()
+        guard let current else {
+            lyrics = []; plainLyrics = nil; activeLyricIndex = nil; loadingLyrics = false; return
+        }
+        loadingLyrics = true; lyrics = []; plainLyrics = nil; activeLyricIndex = nil
+        lyricsTask = Task { [weak self] in
+            let result = await LyricsService.fetchLyrics(title: current.title, artist: current.artist, duration: current.duration)
+            Task { @MainActor in
+                guard let self, self.current?.id == current.id else { return }
+                self.lyrics = result.lines
+                self.plainLyrics = result.plain
+                self.loadingLyrics = false
+            }
+        }
+    }
+
     func toggle() { isPlaying ? pause() : resume() }
     func pause() { player.pause(); isPlaying = false; updateNowPlaying() }
     func resume() {
@@ -95,10 +140,13 @@ import MediaPlayer
         do { try AVAudioSession.sharedInstance().setActive(true); player.play() }
         catch { self.error = "Impossible de reprendre la lecture." }
     }
+
     func seek(_ seconds: Double) {
         guard seconds.isFinite else { return }
         player.seek(to: CMTime(seconds: min(max(0, seconds), duration), preferredTimescale: 600)); elapsed = seconds
+        if !lyrics.isEmpty { activeLyricIndex = lyrics.lastIndex(where: { $0.time <= seconds }) }
     }
+
     func next(automatic: Bool = false) {
         guard !queue.isEmpty else { return }
         if automatic && repeatMode == .one { seek(0); resume(); return }
@@ -110,18 +158,22 @@ import MediaPlayer
         else { pause(); seek(0); return }
         loadCurrent()
     }
+
     func previous() {
         if elapsed > 3 { seek(0); return }
         if shuffle, let previous = shuffleHistory.popLast() { index = previous }
         else { index = max(0, index - 1) }
         loadCurrent()
     }
+
     func enqueue(_ track: Track) {
-        guard library?.localURL(track) != nil else { error = "Téléchargez ce titre avant de l’ajouter à la file."; return }
+        guard playableURL(for: track) != nil else { error = "Source audio introuvable."; return }
         if current == nil { play(track) } else { queue.append(track) }
     }
+
     func selectQueue(_ position: Int) { guard queue.indices.contains(position) else { return }; index = position; loadCurrent() }
     func cycleRepeat() { repeatMode = RepeatMode(rawValue: (repeatMode.rawValue + 1) % 3) ?? .off }
+
     func setSleep(minutes: Int?) {
         sleepTask?.cancel()
         guard let minutes else { sleepUntil = nil; return }
@@ -131,11 +183,14 @@ import MediaPlayer
             self?.pause(); self?.sleepUntil = nil
         }
     }
+
     func stop() {
         pause(); player.replaceCurrentItem(with: nil); current = nil; queue = []; elapsed = 0; duration = 0
+        lyrics = []; plainLyrics = nil; activeLyricIndex = nil
         setSleep(minutes: nil); MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
+
     private func updateNowPlaying(includeArtwork: Bool = false) {
         guard let current else { return }
         var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
@@ -144,8 +199,18 @@ import MediaPlayer
         info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
         if includeArtwork {
             info.removeValue(forKey: MPMediaItemPropertyArtwork)
-            if let url = library?.artworkURL(current), let image = UIImage(contentsOfFile: url.path) {
+            if let local = library?.artworkURL(current), let image = UIImage(contentsOfFile: local.path) {
                 info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+            } else if let remote = current.artworkURL, let url = URL(string: remote) {
+                Task {
+                    if let (data, _) = try? await URLSession.shared.data(from: url), let image = UIImage(data: data) {
+                        Task { @MainActor in
+                            var currentInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+                            currentInfo[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+                            MPNowPlayingInfoCenter.default().nowPlayingInfo = currentInfo
+                        }
+                    }
+                }
             }
         }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
