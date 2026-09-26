@@ -296,7 +296,7 @@ struct LyricsView: View {
         ScrollViewReader { proxy in
             ZStack(alignment: .topTrailing) {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 18) {
                         if player.loadingLyrics {
                             VStack(spacing: 16) {
                                 ProgressView().tint(.white)
@@ -307,12 +307,11 @@ struct LyricsView: View {
                             }
                             .frame(maxWidth: .infinity, minHeight: 280, alignment: .center)
                         } else if !player.lyrics.isEmpty {
-                            Color.clear.frame(height: 100)
+                            Color.clear.frame(height: 110)
                             ForEach(Array(player.lyrics.enumerated()), id: \.element.id) { index, line in
                                 let activeIndex = player.activeLyricIndex ?? -1
                                 let isActive = index == activeIndex
                                 let isSung = !isActive && index < activeIndex
-                                let nextTime = index + 1 < player.lyrics.count ? player.lyrics[index + 1].time : line.time + 4
 
                                 Button {
                                     player.seek(to: line)
@@ -320,9 +319,6 @@ struct LyricsView: View {
                                 } label: {
                                     SpicyLyricLine(
                                         line: line,
-                                        nextTime: nextTime,
-                                        elapsed: player.elapsed,
-                                        offset: player.lyricsOffset,
                                         distance: abs(index - activeIndex),
                                         isActive: isActive,
                                         isSung: isSung
@@ -331,14 +327,14 @@ struct LyricsView: View {
                                 .buttonStyle(PlainButtonStyle())
                                 .id(index)
                             }
-                            Color.clear.frame(height: 160)
+                            Color.clear.frame(height: 180)
                         } else if let plain = player.plainLyrics, !plain.isEmpty {
                             Text(plain)
                                 .font(.system(size: 24, weight: .bold, design: .rounded))
                                 .foregroundStyle(.white.opacity(0.85))
                                 .lineSpacing(10)
                                 .padding(.vertical, 40)
-                                .padding(.horizontal, 12)
+                                .padding(.horizontal, 16)
                         } else {
                             VStack(spacing: 14) {
                                 Image(systemName: "music.mic").font(.system(size: 38, weight: .light))
@@ -348,7 +344,7 @@ struct LyricsView: View {
                             .frame(maxWidth: .infinity, minHeight: 280)
                         }
                     }
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, 20)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .scrollIndicators(.hidden)
@@ -406,20 +402,14 @@ struct LyricsView: View {
 
 private struct SpicyLyricLine: View {
     let line: LyricLine
-    let nextTime: Double
-    let elapsed: Double
-    let offset: Double
     let distance: Int
     let isActive: Bool
     let isSung: Bool
 
-    private var progress: Double {
-        guard isActive else { return isSung ? 1.0 : 0.0 }
-        let start = line.time + offset
-        let end = max(start + 0.35, nextTime + offset)
-        return min(1.0, max(0.0, (elapsed + 0.10 - start) / (end - start)))
-    }
-
+    // Spicy Lyrics opacities:
+    // --Vocal-Active-opacity: 1;
+    // --Vocal-NotSung-opacity: 0.51;
+    // --Vocal-Sung-opacity: 0.35;
     private var textOpacity: Double {
         if isActive { return 1.0 }
         if isSung { return 0.35 }
@@ -427,49 +417,23 @@ private struct SpicyLyricLine: View {
     }
 
     private var textScale: Double {
-        isActive ? 1.05 : 0.96
+        isActive ? 1.04 : 0.96
     }
 
     var body: some View {
-        let lyric = Text(line.text)
+        Text(line.text)
             .font(.system(size: 26, weight: .bold, design: .rounded))
-            .tracking(-0.4)
-            .lineSpacing(4)
+            .tracking(-0.35)
+            .lineSpacing(6)
             .multilineTextAlignment(.leading)
-
-        ZStack(alignment: .leading) {
-            lyric
-                .foregroundStyle(Color.white.opacity(textOpacity))
-
-            if isActive {
-                GeometryReader { geo in
-                    lyric
-                        .foregroundStyle(Color.white)
-                        .shadow(color: Color.white.opacity(0.55), radius: 14, x: 0, y: 0)
-                        .shadow(color: Color.white.opacity(0.35), radius: 6, x: 0, y: 0)
-                        .frame(width: geo.size.width, height: geo.size.height, alignment: .leading)
-                        .mask(alignment: .leading) {
-                            Rectangle()
-                                .frame(width: max(0, geo.size.width * progress))
-                        }
-                }
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(isActive ? Color.white.opacity(0.08) : Color.clear)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(isActive ? Color.white.opacity(0.12) : Color.clear, lineWidth: 1)
-        )
-        .scaleEffect(textScale, anchor: .leading)
-        .blur(radius: !isActive && distance > 3 ? min(1.8, Double(distance - 2) * 0.5) : 0)
-        .animation(.spring(response: 0.42, dampingFraction: 0.80), value: isActive)
-        .animation(.linear(duration: 0.20), value: progress)
-        .contentShape(Rectangle())
+            .foregroundStyle(Color.white.opacity(textOpacity))
+            .shadow(color: isActive ? Color.white.opacity(0.50) : Color.clear, radius: 10, x: 0, y: 0)
+            .shadow(color: isActive ? Color.white.opacity(0.25) : Color.clear, radius: 22, x: 0, y: 0)
+            .scaleEffect(textScale, anchor: .leading)
+            .blur(radius: !isActive && distance > 3 ? min(1.6, Double(distance - 2) * 0.5) : 0)
+            .padding(.vertical, 4)
+            .animation(.spring(response: 0.40, dampingFraction: 0.82), value: isActive)
+            .contentShape(Rectangle())
     }
 }
 
