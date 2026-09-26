@@ -192,16 +192,23 @@ struct LyricsView: View {
                             VStack(alignment: .leading, spacing: 18) { ProgressView().tint(.white); Text("On cale les paroles\nsur cette version…").font(.title2.bold()).foregroundStyle(.white.opacity(0.68)) }
                                 .frame(maxWidth: .infinity, minHeight: 290, alignment: .center)
                         } else if !player.lyrics.isEmpty {
-                            Color.clear.frame(height: 85)
+                            Color.clear.frame(height: 110)
                             ForEach(Array(player.lyrics.enumerated()), id: \.element.id) { index, line in
-                                let active = index == (player.activeLyricIndex ?? -1)
+                                let activeIndex = player.activeLyricIndex ?? -1
+                                let active = index == activeIndex
+                                let nextTime = index + 1 < player.lyrics.count ? player.lyrics[index + 1].time : line.time + 4
                                 Button { player.seek(to: line) } label: {
-                                    Text(line.text).font(.system(size: active ? 30 : 24, weight: active ? .bold : .semibold, design: .rounded)).tracking(active ? -0.8 : -0.45)
-                                        .foregroundStyle(active ? .white : .white.opacity(0.24)).multilineTextAlignment(.leading)
-                                        .scaleEffect(active ? 1 : 0.97, anchor: .leading).animation(.spring(response: 0.38, dampingFraction: 0.83), value: active)
+                                    KaraokeLyricLine(
+                                        line: line,
+                                        nextTime: nextTime,
+                                        elapsed: player.elapsed,
+                                        offset: player.lyricsOffset,
+                                        distance: abs(index - activeIndex),
+                                        isActive: active
+                                    )
                                 }.buttonStyle(.plain).id(index)
                             }
-                            Color.clear.frame(height: 130)
+                            Color.clear.frame(height: 160)
                         } else if let plain = player.plainLyrics, !plain.isEmpty {
                             Text(plain).font(.system(size: 22, weight: .semibold, design: .rounded)).foregroundStyle(.white.opacity(0.72)).lineSpacing(10).padding(.vertical, 60)
                         } else {
@@ -217,8 +224,62 @@ struct LyricsView: View {
                         Button { player.adjustLyricsOffset(by: 0.25) } label: { Image(systemName: "plus") }
                     }.font(.caption.bold()).padding(8).background(.ultraThinMaterial, in: Capsule())
                 }
-            }.onChange(of: player.activeLyricIndex) { _, value in if let value { withAnimation(.easeInOut(duration: 0.32)) { proxy.scrollTo(value, anchor: .center) } } }
+            }.onChange(of: player.activeLyricIndex) { _, value in
+                if let value {
+                    withAnimation(.spring(response: 0.58, dampingFraction: 0.88)) {
+                        proxy.scrollTo(value, anchor: .center)
+                    }
+                }
+            }
         }
+    }
+}
+
+private struct KaraokeLyricLine: View {
+    let line: LyricLine
+    let nextTime: Double
+    let elapsed: Double
+    let offset: Double
+    let distance: Int
+    let isActive: Bool
+
+    private var progress: Double {
+        guard isActive else { return 0 }
+        let start = line.time + offset
+        let end = max(start + 0.45, nextTime + offset)
+        return min(1, max(0, (elapsed + 0.12 - start) / (end - start)))
+    }
+
+    private var baseOpacity: Double {
+        if isActive { return 0.28 }
+        switch distance { case 1: return 0.34; case 2: return 0.22; default: return 0.12 }
+    }
+
+    var body: some View {
+        let lyric = Text(line.text)
+            .font(.system(size: 27, weight: .bold, design: .rounded))
+            .tracking(-0.65)
+            .multilineTextAlignment(.leading)
+
+        lyric
+            .foregroundStyle(.white.opacity(baseOpacity))
+            .overlay(alignment: .leading) {
+                GeometryReader { geo in
+                    lyric
+                        .foregroundStyle(.white)
+                        .frame(width: geo.size.width, height: geo.size.height, alignment: .leading)
+                        .mask(alignment: .leading) {
+                            Rectangle().frame(width: max(0, geo.size.width * progress))
+                        }
+                }
+                .opacity(isActive ? 1 : 0)
+            }
+            .shadow(color: isActive ? NW.blue.opacity(0.42) : .clear, radius: 18)
+            .scaleEffect(isActive ? 1.025 : 0.97, anchor: .leading)
+            .blur(radius: distance > 3 ? 0.7 : 0)
+            .animation(.linear(duration: 0.24), value: progress)
+            .animation(.spring(response: 0.5, dampingFraction: 0.84), value: isActive)
+            .contentShape(Rectangle())
     }
 }
 
