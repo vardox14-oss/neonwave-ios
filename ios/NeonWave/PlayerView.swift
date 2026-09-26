@@ -55,19 +55,36 @@ struct PlayerView: View {
                 if let track = player.current {
                     VStack(spacing: 0) {
                         header(track)
-                        modeSelector.padding(.top, 8)
-                        content(track, size: geo.size).frame(maxWidth: .infinity, maxHeight: .infinity).padding(.top, 12)
-                        trackInfo(track).padding(.top, 14)
-                        timeline.padding(.top, 12)
-                        controls.padding(.top, 8)
-                        footer(track).padding(.top, 8)
+                            .padding(.top, max(6, geo.safeAreaInsets.top > 0 ? 0 : 8))
+                        modeSelector
+                            .padding(.top, 6)
+
+                        Spacer(minLength: 8)
+
+                        content(track, size: geo.size)
+
+                        Spacer(minLength: 12)
+
+                        trackInfo(track)
+
+                        Spacer(minLength: 8)
+
+                        timeline
+
+                        Spacer(minLength: 10)
+
+                        controls
+
+                        Spacer(minLength: 14)
+
+                        footer(track)
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, max(10, geo.safeAreaInsets.bottom))
-                    .frame(width: geo.size.width)
+                    .padding(.horizontal, 22)
+                    .padding(.bottom, max(12, geo.safeAreaInsets.bottom))
+                    .frame(width: geo.size.width, height: geo.size.height)
                 }
             }
-            .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
+            .frame(width: geo.size.width, height: geo.size.height)
             .clipped()
         }
         .sheet(isPresented: $showQueue) { QueueView() }
@@ -161,8 +178,9 @@ struct PlayerView: View {
     }
 
     @ViewBuilder private func content(_ track: Track, size: CGSize) -> some View {
-        let maxW = max(180, size.width - 48)
-        let dimension = min(maxW, min(330, size.height * 0.40))
+        let maxAvailable = size.height - 400
+        let maxW = size.width - 48
+        let dimension = min(maxW, max(180, min(320, maxAvailable)))
         switch mode {
         case .cover:
             CoverArt(track: track, imageURL: library.artworkURL(track), remoteURL: track.artworkURL, radius: 28)
@@ -250,6 +268,7 @@ struct PlayerView: View {
             .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity)
+        .frame(height: 72)
     }
 
     private func footer(_ track: Track) -> some View {
