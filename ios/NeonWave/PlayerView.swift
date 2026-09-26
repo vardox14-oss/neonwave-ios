@@ -47,6 +47,7 @@ struct PlayerView: View {
     @State private var showTimer = false
     @State private var dragging = false
     @State private var scrub = 0.0
+    @State private var canvasURL: URL? = nil
 
     var body: some View {
         GeometryReader { geo in
@@ -93,29 +94,62 @@ struct PlayerView: View {
             if player.sleepUntil != nil { Button("Désactiver la minuterie", role: .destructive) { player.setSleep(minutes: nil) } }
         }
         .onChange(of: player.current?.id) { _, value in if value == nil { dismiss() } }
+        .task(id: player.current?.id) {
+            guard let track = player.current else {
+                canvasURL = nil
+                return
+            }
+            canvasURL = nil
+            let state = await SpotifyCanvasService.load(for: track)
+            if case .ready(let url) = state {
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.5)) {
+                    canvasURL = url
+                }
+            }
+        }
     }
 
     @ViewBuilder private func immersiveBackground(size: CGSize) -> some View {
         if let track = player.current {
             ZStack {
                 NW.background
-                AsyncImage(url: track.artworkURL.flatMap(URL.init(string:))) { image in
-                    image
-                        .resizable()
-                        .scaledToFill()
+                if let canvasURL = canvasURL {
+                    LoopingCanvasVideo(url: canvasURL, isPlaying: player.isPlaying)
                         .frame(width: size.width, height: size.height)
                         .clipped()
-                } placeholder: {
-                    LinearGradient(colors: NW.colors[track.colorIndex], startPoint: .topLeading, endPoint: .bottomTrailing)
-                }
-                .frame(width: size.width, height: size.height)
-                .scaleEffect(1.4)
-                .blur(radius: 72)
-                .opacity(0.38)
-                .clipped()
+                        .transition(.opacity)
 
-                LinearGradient(colors: [.black.opacity(0.12), NW.background.opacity(0.72), NW.background], startPoint: .top, endPoint: .bottom)
-                RadialGradient(colors: [NW.colors[track.colorIndex][0].opacity(0.19), .clear], center: .topTrailing, startRadius: 20, endRadius: 390)
+                    LinearGradient(
+                        colors: [
+                            .black.opacity(0.35),
+                            .black.opacity(0.05),
+                            .black.opacity(0.40),
+                            .black.opacity(0.80),
+                            NW.background
+                        ],
+                        stops: [0.0, 0.22, 0.55, 0.82, 1.0],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                } else {
+                    AsyncImage(url: track.artworkURL.flatMap(URL.init(string:))) { image in
+                        image
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: size.width, height: size.height)
+                            .clipped()
+                    } placeholder: {
+                        LinearGradient(colors: NW.colors[track.colorIndex], startPoint: .topLeading, endPoint: .bottomTrailing)
+                    }
+                    .frame(width: size.width, height: size.height)
+                    .scaleEffect(1.4)
+                    .blur(radius: 72)
+                    .opacity(0.38)
+                    .clipped()
+
+                    LinearGradient(colors: [.black.opacity(0.12), NW.background.opacity(0.72), NW.background], startPoint: .top, endPoint: .bottom)
+                    RadialGradient(colors: [NW.colors[track.colorIndex][0].opacity(0.19), .clear], center: .topTrailing, startRadius: 20, endRadius: 390)
+                }
             }
             .frame(width: size.width, height: size.height)
             .clipped()
@@ -182,12 +216,25 @@ struct PlayerView: View {
         let dimension = min(maxW, min(290, max(180, size.height * 0.34)))
         switch mode {
         case .cover:
-            CoverArt(track: track, imageURL: library.artworkURL(track), remoteURL: track.artworkURL, radius: 28)
+            if canvasURL != nil {
+                VStack {
+                    Spacer()
+                    Label("CANVAS SPOTIFY", systemImage: "sparkles.tv.fill")
+                        .font(.system(size: 10, weight: .bold)).tracking(1.4)
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .foregroundStyle(.white.opacity(0.85))
+                        .overlay(Capsule().stroke(.white.opacity(0.12)))
+                }
                 .frame(width: dimension, height: dimension)
-                .shadow(color: .black.opacity(0.45), radius: 28, y: 18)
-                .overlay(RoundedRectangle(cornerRadius: 28).stroke(.white.opacity(0.12)))
-                .scaleEffect(player.isPlaying || reduceMotion ? 1 : 0.96)
-                .animation(reduceMotion ? nil : .spring(response: 0.6, dampingFraction: 0.86), value: player.isPlaying)
+            } else {
+                CoverArt(track: track, imageURL: library.artworkURL(track), remoteURL: track.artworkURL, radius: 28)
+                    .frame(width: dimension, height: dimension)
+                    .shadow(color: .black.opacity(0.45), radius: 28, y: 18)
+                    .overlay(RoundedRectangle(cornerRadius: 28).stroke(.white.opacity(0.12)))
+                    .scaleEffect(player.isPlaying || reduceMotion ? 1 : 0.96)
+                    .animation(reduceMotion ? nil : .spring(response: 0.6, dampingFraction: 0.86), value: player.isPlaying)
+            }
         case .lyrics:
             LyricsView(player: player)
                 .frame(maxWidth: .infinity, maxHeight: min(390, size.height * 0.44))

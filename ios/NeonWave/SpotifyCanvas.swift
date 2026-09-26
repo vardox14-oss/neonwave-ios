@@ -10,6 +10,7 @@ enum SpotifyCanvasState: Equatable {
 enum SpotifyCanvasService {
     private struct CanvasResponse: Decodable {
         let canvasUrl: String?
+        let spotifyId: String?
         let connected: Bool
     }
 
@@ -17,11 +18,21 @@ enum SpotifyCanvasService {
         guard AppConfiguration.apiURL != nil else {
             return .unavailable("Le service NeonWave doit être connecté pour charger les Canvas Spotify.")
         }
-        guard let spotifyId = track.spotifyId, !spotifyId.isEmpty else {
-            return .unavailable("Ce morceau ne possède pas encore d’identifiant Spotify.")
+        let targetId: String
+        var query = ""
+        if let spId = track.spotifyId, spId.count == 22 {
+            targetId = spId
+        } else {
+            targetId = "resolve"
+            let t = track.title.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+            let a = track.artist.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+            query = "?title=\(t)&artist=\(a)"
         }
         do {
-            let response: CanvasResponse = try await APIClient().call("api/spotify/canvas/\(spotifyId)")
+            let response: CanvasResponse = try await APIClient().call("api/spotify/canvas/\(targetId)\(query)")
+            if let resolved = response.spotifyId, track.spotifyId == nil || track.spotifyId?.isEmpty == true {
+                track.spotifyId = resolved
+            }
             guard response.connected else {
                 return .unavailable("Connectez Spotify dans NeonWave sur votre PC pour activer les Canvas.")
             }
