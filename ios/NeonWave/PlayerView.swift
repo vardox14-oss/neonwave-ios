@@ -290,50 +290,112 @@ struct PlayerView: View {
 
 struct LyricsView: View {
     @ObservedObject var player: AudioPlayer
+    @EnvironmentObject private var library: LibraryStore
+
     var body: some View {
         ScrollViewReader { proxy in
             ZStack(alignment: .topTrailing) {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 22) {
+                    VStack(alignment: .leading, spacing: 14) {
                         if player.loadingLyrics {
-                            VStack(alignment: .leading, spacing: 18) { ProgressView().tint(.white); Text("On cale les paroles\nsur cette version…").font(.title2.bold()).foregroundStyle(.white.opacity(0.68)) }
-                                .frame(maxWidth: .infinity, minHeight: 290, alignment: .center)
+                            VStack(spacing: 16) {
+                                ProgressView().tint(.white)
+                                Text("On cale les paroles\nsur cette version…")
+                                    .font(.system(size: 19, weight: .bold, design: .rounded))
+                                    .foregroundStyle(.white.opacity(0.68))
+                                    .multilineTextAlignment(.center)
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 280, alignment: .center)
                         } else if !player.lyrics.isEmpty {
-                            Color.clear.frame(height: 110)
+                            Color.clear.frame(height: 100)
                             ForEach(Array(player.lyrics.enumerated()), id: \.element.id) { index, line in
                                 let activeIndex = player.activeLyricIndex ?? -1
-                                let active = index == activeIndex
+                                let isActive = index == activeIndex
+                                let isSung = !isActive && index < activeIndex
                                 let nextTime = index + 1 < player.lyrics.count ? player.lyrics[index + 1].time : line.time + 4
-                                Button { player.seek(to: line) } label: {
-                                    KaraokeLyricLine(
+
+                                Button {
+                                    player.seek(to: line)
+                                    library.haptic()
+                                } label: {
+                                    SpicyLyricLine(
                                         line: line,
                                         nextTime: nextTime,
                                         elapsed: player.elapsed,
                                         offset: player.lyricsOffset,
                                         distance: abs(index - activeIndex),
-                                        isActive: active
+                                        isActive: isActive,
+                                        isSung: isSung
                                     )
-                                }.buttonStyle(.plain).id(index)
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                .id(index)
                             }
                             Color.clear.frame(height: 160)
                         } else if let plain = player.plainLyrics, !plain.isEmpty {
-                            Text(plain).font(.system(size: 22, weight: .semibold, design: .rounded)).foregroundStyle(.white.opacity(0.72)).lineSpacing(10).padding(.vertical, 60)
+                            Text(plain)
+                                .font(.system(size: 24, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.85))
+                                .lineSpacing(10)
+                                .padding(.vertical, 40)
+                                .padding(.horizontal, 12)
                         } else {
-                            VStack(spacing: 14) { Image(systemName: "music.mic").font(.system(size: 38)); Text("Paroles indisponibles").font(.headline) }.foregroundStyle(.white.opacity(0.5)).frame(maxWidth: .infinity, minHeight: 290)
+                            VStack(spacing: 14) {
+                                Image(systemName: "music.mic").font(.system(size: 38, weight: .light))
+                                Text("Paroles indisponibles").font(.system(size: 17, weight: .bold, design: .rounded))
+                            }
+                            .foregroundStyle(.white.opacity(0.45))
+                            .frame(maxWidth: .infinity, minHeight: 280)
                         }
-                    }.frame(maxWidth: .infinity, alignment: .leading)
-                }.scrollIndicators(.hidden)
-                    .mask(LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.12), .init(color: .black, location: 0.84), .init(color: .clear, location: 1)], startPoint: .top, endPoint: .bottom))
-                if !player.lyrics.isEmpty {
-                    HStack(spacing: 4) {
-                        Button { player.adjustLyricsOffset(by: -0.25) } label: { Image(systemName: "minus") }
-                        Button { player.resetLyricsOffset() } label: { Text(String(format: "%+.2fs", player.lyricsOffset)).font(.caption.monospacedDigit()).frame(minWidth: 54) }
-                        Button { player.adjustLyricsOffset(by: 0.25) } label: { Image(systemName: "plus") }
-                    }.font(.caption.bold()).padding(8).background(.ultraThinMaterial, in: Capsule())
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-            }.onChange(of: player.activeLyricIndex) { _, value in
+                .scrollIndicators(.hidden)
+                .mask(
+                    LinearGradient(
+                        stops: [
+                            .init(color: .clear, location: 0.0),
+                            .init(color: .black, location: 0.10),
+                            .init(color: .black, location: 0.88),
+                            .init(color: .clear, location: 1.0)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+
+                if !player.lyrics.isEmpty {
+                    HStack(spacing: 6) {
+                        Button { player.adjustLyricsOffset(by: -0.25); library.haptic() } label: {
+                            Image(systemName: "minus")
+                                .font(.system(size: 11, weight: .bold))
+                                .frame(width: 24, height: 24)
+                        }
+                        Button { player.resetLyricsOffset(); library.haptic() } label: {
+                            Text(String(format: "%+.2fs", player.lyricsOffset))
+                                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                .frame(minWidth: 50)
+                        }
+                        Button { player.adjustLyricsOffset(by: 0.25); library.haptic() } label: {
+                            Image(systemName: "plus")
+                                .font(.system(size: 11, weight: .bold))
+                                .frame(width: 24, height: 24)
+                        }
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 1))
+                    .shadow(color: .black.opacity(0.35), radius: 8, y: 4)
+                    .padding(.top, 4)
+                    .padding(.trailing, 8)
+                }
+            }
+            .onChange(of: player.activeLyricIndex) { _, value in
                 if let value {
-                    withAnimation(.spring(response: 0.58, dampingFraction: 0.88)) {
+                    withAnimation(.spring(response: 0.52, dampingFraction: 0.82)) {
                         proxy.scrollTo(value, anchor: .center)
                     }
                 }
@@ -342,51 +404,72 @@ struct LyricsView: View {
     }
 }
 
-private struct KaraokeLyricLine: View {
+private struct SpicyLyricLine: View {
     let line: LyricLine
     let nextTime: Double
     let elapsed: Double
     let offset: Double
     let distance: Int
     let isActive: Bool
+    let isSung: Bool
 
     private var progress: Double {
-        guard isActive else { return 0 }
+        guard isActive else { return isSung ? 1.0 : 0.0 }
         let start = line.time + offset
-        let end = max(start + 0.45, nextTime + offset)
-        return min(1, max(0, (elapsed + 0.12 - start) / (end - start)))
+        let end = max(start + 0.35, nextTime + offset)
+        return min(1.0, max(0.0, (elapsed + 0.10 - start) / (end - start)))
     }
 
-    private var baseOpacity: Double {
-        if isActive { return 0.28 }
-        switch distance { case 1: return 0.34; case 2: return 0.22; default: return 0.12 }
+    private var textOpacity: Double {
+        if isActive { return 1.0 }
+        if isSung { return 0.35 }
+        return 0.51
+    }
+
+    private var textScale: Double {
+        isActive ? 1.05 : 0.96
     }
 
     var body: some View {
         let lyric = Text(line.text)
-            .font(.system(size: 27, weight: .bold, design: .rounded))
-            .tracking(-0.65)
+            .font(.system(size: 26, weight: .bold, design: .rounded))
+            .tracking(-0.4)
+            .lineSpacing(4)
             .multilineTextAlignment(.leading)
 
-        lyric
-            .foregroundStyle(.white.opacity(baseOpacity))
-            .overlay(alignment: .leading) {
+        ZStack(alignment: .leading) {
+            lyric
+                .foregroundStyle(Color.white.opacity(textOpacity))
+
+            if isActive {
                 GeometryReader { geo in
                     lyric
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Color.white)
+                        .shadow(color: Color.white.opacity(0.55), radius: 14, x: 0, y: 0)
+                        .shadow(color: Color.white.opacity(0.35), radius: 6, x: 0, y: 0)
                         .frame(width: geo.size.width, height: geo.size.height, alignment: .leading)
                         .mask(alignment: .leading) {
-                            Rectangle().frame(width: max(0, geo.size.width * progress))
+                            Rectangle()
+                                .frame(width: max(0, geo.size.width * progress))
                         }
                 }
-                .opacity(isActive ? 1 : 0)
             }
-            .shadow(color: isActive ? NW.blue.opacity(0.42) : .clear, radius: 18)
-            .scaleEffect(isActive ? 1.025 : 0.97, anchor: .leading)
-            .blur(radius: distance > 3 ? 0.7 : 0)
-            .animation(.linear(duration: 0.24), value: progress)
-            .animation(.spring(response: 0.5, dampingFraction: 0.84), value: isActive)
-            .contentShape(Rectangle())
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(isActive ? Color.white.opacity(0.08) : Color.clear)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(isActive ? Color.white.opacity(0.12) : Color.clear, lineWidth: 1)
+        )
+        .scaleEffect(textScale, anchor: .leading)
+        .blur(radius: !isActive && distance > 3 ? min(1.8, Double(distance - 2) * 0.5) : 0)
+        .animation(.spring(response: 0.42, dampingFraction: 0.80), value: isActive)
+        .animation(.linear(duration: 0.20), value: progress)
+        .contentShape(Rectangle())
     }
 }
 
