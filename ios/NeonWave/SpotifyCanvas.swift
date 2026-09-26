@@ -19,17 +19,20 @@ enum SpotifyCanvasService {
             return .unavailable("Le service NeonWave doit être connecté pour charger les Canvas Spotify.")
         }
         let targetId: String
-        var query = ""
+        var queryItems: [URLQueryItem] = []
         if let spId = track.spotifyId, spId.count == 22 {
             targetId = spId
         } else {
             targetId = "resolve"
-            let t = track.title.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-            let a = track.artist.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-            query = "?title=\(t)&artist=\(a)"
+            queryItems.append(URLQueryItem(name: "title", value: track.title))
+            queryItems.append(URLQueryItem(name: "artist", value: track.artist))
         }
         do {
-            let response: CanvasResponse = try await APIClient().call("api/spotify/canvas/\(targetId)\(query)")
+            let response: CanvasResponse = try await APIClient().call(
+                "api/spotify/canvas/\(targetId)",
+                authenticated: false,
+                queryItems: queryItems
+            )
             guard response.connected else {
                 return .unavailable("Connectez Spotify dans NeonWave sur votre PC pour activer les Canvas.")
             }

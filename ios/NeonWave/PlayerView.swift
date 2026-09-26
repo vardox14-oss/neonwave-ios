@@ -5,8 +5,7 @@ import MediaPlayer
 enum PlayerMode: String, CaseIterable {
     case cover = "Pochette"
     case lyrics = "Paroles"
-    case canvas = "Canvas"
-    var symbol: String { switch self { case .cover: return "square.stack.fill"; case .lyrics: return "quote.bubble.fill"; case .canvas: return "sparkles.tv.fill" } }
+    var symbol: String { switch self { case .cover: return "square.stack.fill"; case .lyrics: return "quote.bubble.fill" } }
 }
 
 struct MiniPlayer: View {
@@ -48,6 +47,7 @@ struct PlayerView: View {
     @State private var dragging = false
     @State private var scrub = 0.0
     @State private var canvasURL: URL? = nil
+    @State private var showArtworkOverlay = false
 
     var body: some View {
         GeometryReader { geo in
@@ -97,9 +97,11 @@ struct PlayerView: View {
         .task(id: player.current?.id) {
             guard let track = player.current else {
                 canvasURL = nil
+                showArtworkOverlay = false
                 return
             }
             canvasURL = nil
+            showArtworkOverlay = false
             let state = await SpotifyCanvasService.load(for: track)
             if case .ready(let url) = state {
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.5)) {
@@ -215,17 +217,36 @@ struct PlayerView: View {
         let dimension = min(maxW, min(290, max(180, size.height * 0.34)))
         switch mode {
         case .cover:
-            if canvasURL != nil {
+            if canvasURL != nil && !showArtworkOverlay {
                 VStack {
                     Spacer()
-                    Label("CANVAS SPOTIFY", systemImage: "sparkles.tv.fill")
-                        .font(.system(size: 10, weight: .bold)).tracking(1.4)
-                        .padding(.horizontal, 14).padding(.vertical, 8)
+                    Button {
+                        withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.8)) {
+                            showArtworkOverlay = true
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "sparkles.tv.fill")
+                                .font(.system(size: 10, weight: .bold))
+                            Text("CANVAS SPOTIFY")
+                                .font(.system(size: 9, weight: .bold))
+                                .tracking(1.4)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
                         .background(.ultraThinMaterial, in: Capsule())
-                        .foregroundStyle(.white.opacity(0.85))
+                        .foregroundStyle(.white.opacity(0.9))
                         .overlay(Capsule().stroke(.white.opacity(0.12)))
+                    }
+                    .buttonStyle(.plain)
                 }
                 .frame(width: dimension, height: dimension)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.8)) {
+                        showArtworkOverlay = true
+                    }
+                }
             } else {
                 CoverArt(track: track, imageURL: library.artworkURL(track), remoteURL: track.artworkURL, radius: 28)
                     .frame(width: dimension, height: dimension)
@@ -233,16 +254,28 @@ struct PlayerView: View {
                     .overlay(RoundedRectangle(cornerRadius: 28).stroke(.white.opacity(0.12)))
                     .scaleEffect(player.isPlaying || reduceMotion ? 1 : 0.96)
                     .animation(reduceMotion ? nil : .spring(response: 0.6, dampingFraction: 0.86), value: player.isPlaying)
+                    .overlay(alignment: .topTrailing) {
+                        if canvasURL != nil {
+                            Button {
+                                withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.8)) {
+                                    showArtworkOverlay = false
+                                }
+                            } label: {
+                                Image(systemName: "sparkles.tv.fill")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(.white)
+                                    .padding(8)
+                                    .background(.ultraThinMaterial, in: Circle())
+                                    .overlay(Circle().stroke(.white.opacity(0.15)))
+                                    .padding(10)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
             }
         case .lyrics:
             LyricsView(player: player)
                 .frame(maxWidth: .infinity, maxHeight: min(390, size.height * 0.44))
-        case .canvas:
-            SpotifyCanvasView(track: track, isPlaying: player.isPlaying)
-                .frame(width: dimension, height: dimension)
-                .clipShape(RoundedRectangle(cornerRadius: 28))
-                .shadow(color: .black.opacity(0.45), radius: 28, y: 18)
-                .overlay(RoundedRectangle(cornerRadius: 28).stroke(.white.opacity(0.12)))
         }
     }
 
