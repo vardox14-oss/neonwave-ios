@@ -27,10 +27,16 @@ jobs:
           persist-credentials: false
 
       - name: Build the real SwiftUI app for the ARM iOS Simulator
+        env:
+          NEONWAVE_API_URL: ${{ vars.NEONWAVE_API_URL }}
         run: |
           set -euo pipefail
           mkdir -p ios/build
           xcodebuild -version
+          API_SETTING=()
+          if [[ -n "${NEONWAVE_API_URL:-}" ]]; then
+            API_SETTING+=("NEONWAVE_API_URL=$NEONWAVE_API_URL")
+          fi
           xcodebuild \
             -project ios/NeonWave.xcodeproj \
             -scheme NeonWave \
@@ -40,6 +46,7 @@ jobs:
             -derivedDataPath ios/DerivedData \
             ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            "${API_SETTING[@]}" \
             build 2>&1 | tee ios/build/xcodebuild.log
 
       - name: Package the simulator app for Appetize
@@ -73,8 +80,13 @@ jobs:
       - name: Run the native library tests
         env:
           SIMULATOR_ID: ${{ steps.device.outputs.udid }}
+          NEONWAVE_API_URL: ${{ vars.NEONWAVE_API_URL }}
         run: |
           set -euo pipefail
+          API_SETTING=()
+          if [[ -n "${NEONWAVE_API_URL:-}" ]]; then
+            API_SETTING+=("NEONWAVE_API_URL=$NEONWAVE_API_URL")
+          fi
           xcodebuild \
             -project ios/NeonWave.xcodeproj \
             -scheme NeonWave \
@@ -83,6 +95,7 @@ jobs:
             -derivedDataPath ios/DerivedData \
             -resultBundlePath ios/build/NeonWaveTests.xcresult \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            "${API_SETTING[@]}" \
             test 2>&1 | tee ios/build/tests.log
 
       - name: Capture the actual iPhone welcome screen
