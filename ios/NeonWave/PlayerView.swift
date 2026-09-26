@@ -55,38 +55,38 @@ struct PlayerView: View {
                 if let track = player.current {
                     VStack(spacing: 0) {
                         header(track)
-                            .padding(.top, max(6, geo.safeAreaInsets.top > 0 ? 0 : 8))
+                            .padding(.top, max(10, geo.safeAreaInsets.top))
                         modeSelector
-                            .padding(.top, 6)
-
-                        Spacer(minLength: 8)
-
-                        content(track, size: geo.size)
-
-                        Spacer(minLength: 12)
-
-                        trackInfo(track)
-
-                        Spacer(minLength: 8)
-
-                        timeline
+                            .padding(.top, 4)
 
                         Spacer(minLength: 10)
 
-                        controls
+                        content(track, size: geo.size)
 
                         Spacer(minLength: 14)
 
+                        trackInfo(track)
+
+                        Spacer(minLength: 10)
+
+                        timeline
+
+                        Spacer(minLength: 12)
+
+                        controls
+
+                        Spacer(minLength: 20)
+
                         footer(track)
                     }
-                    .padding(.horizontal, 22)
-                    .padding(.bottom, max(12, geo.safeAreaInsets.bottom))
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, max(14, geo.safeAreaInsets.bottom + 6))
                     .frame(width: geo.size.width, height: geo.size.height)
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height)
-            .clipped()
         }
+        .ignoresSafeArea()
         .sheet(isPresented: $showQueue) { QueueView() }
         .confirmationDialog("Minuterie de sommeil", isPresented: $showTimer, titleVisibility: .visible) {
             ForEach([15, 30, 45, 60, 90], id: \.self) { minutes in Button("Dans \(minutes) minutes") { player.setSleep(minutes: minutes) } }
@@ -178,9 +178,8 @@ struct PlayerView: View {
     }
 
     @ViewBuilder private func content(_ track: Track, size: CGSize) -> some View {
-        let maxAvailable = size.height - 400
-        let maxW = size.width - 48
-        let dimension = min(maxW, max(180, min(320, maxAvailable)))
+        let maxW = size.width - 64
+        let dimension = min(maxW, min(290, max(180, size.height * 0.34)))
         switch mode {
         case .cover:
             CoverArt(track: track, imageURL: library.artworkURL(track), remoteURL: track.artworkURL, radius: 28)
@@ -191,7 +190,7 @@ struct PlayerView: View {
                 .animation(reduceMotion ? nil : .spring(response: 0.6, dampingFraction: 0.86), value: player.isPlaying)
         case .lyrics:
             LyricsView(player: player)
-                .frame(maxWidth: .infinity, maxHeight: min(390, size.height * 0.46))
+                .frame(maxWidth: .infinity, maxHeight: min(390, size.height * 0.44))
         case .canvas:
             SpotifyCanvasView(track: track, isPlaying: player.isPlaying)
                 .frame(width: dimension, height: dimension)
