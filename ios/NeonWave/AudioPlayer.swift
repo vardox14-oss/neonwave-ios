@@ -41,9 +41,9 @@ private final class SilentAudioKeepAlive {
         var cSize = chunkSize.littleEndian
         data.append(Data(bytes: &cSize, count: MemoryLayout<UInt32>.size))
         data.append(contentsOf: "WAVEfmt ".utf8)
-        var sc1Size: UInt32 = 16.littleEndian
+        var sc1Size = UInt32(16).littleEndian
         data.append(Data(bytes: &sc1Size, count: MemoryLayout<UInt32>.size))
-        var formatTag: UInt16 = 1.littleEndian
+        var formatTag = UInt16(1).littleEndian
         data.append(Data(bytes: &formatTag, count: MemoryLayout<UInt16>.size))
         var ch = channels.littleEndian
         data.append(Data(bytes: &ch, count: MemoryLayout<UInt16>.size))
