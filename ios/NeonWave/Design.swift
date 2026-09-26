@@ -18,11 +18,13 @@ enum NW {
 struct WaveMark: View {
     var size: CGFloat = 34
     var body: some View {
-        HStack(spacing: size * 0.09) {
-            ForEach(Array([0.35, 0.7, 1.0, 0.56, 0.82].enumerated()), id: \.offset) { _, height in
-                Capsule().fill(.white).frame(width: size * 0.12, height: size * height)
-            }
-        }.frame(width: size, height: size).accessibilityHidden(true)
+        Image("NeonLogo")
+            .resizable()
+            .renderingMode(.original)
+            .scaledToFit()
+            .frame(width: size, height: size)
+            .shadow(color: NW.blue.opacity(0.48), radius: size * 0.16)
+            .accessibilityHidden(true)
     }
 }
 
