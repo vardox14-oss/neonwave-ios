@@ -150,9 +150,19 @@ struct LibraryView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
                 HStack {
-                    SectionHeading(title: "Votre bibliothèque", eyebrow: "Les titres qui restent")
+                    SectionHeading(title: "Votre bibliothèque", eyebrow: "VOTRE COLLECTION")
                     IconButton(symbol: "plus", label: "Créer une playlist") { newPlaylist = true }.background(NW.surface, in: Circle())
                 }.padding(.top, 16)
+                ZStack(alignment: .leading) {
+                    LinearGradient(colors: [NW.violet.opacity(0.72), NW.blue.opacity(0.42), NW.surface], startPoint: .topLeading, endPoint: .bottomTrailing)
+                    HStack(spacing: 22) {
+                        libraryMetric(value: library.tracks.count, label: "TITRES", symbol: "music.note")
+                        Divider().overlay(.white.opacity(0.12)).frame(height: 50)
+                        libraryMetric(value: library.playlists.count, label: "PLAYLISTS", symbol: "square.stack.fill")
+                        Divider().overlay(.white.opacity(0.12)).frame(height: 50)
+                        libraryMetric(value: library.liked.count, label: "FAVORIS", symbol: "heart.fill")
+                    }.frame(maxWidth: .infinity).padding(20)
+                }.clipShape(RoundedRectangle(cornerRadius: 25, style: .continuous)).overlay(RoundedRectangle(cornerRadius: 25).stroke(.white.opacity(0.11)))
                 HStack(spacing: 12) {
                     Button(action: importFiles) { Label("Importer", systemImage: "square.and.arrow.down").font(.subheadline.bold()).padding(14).frame(maxWidth: .infinity).background(NW.blue.opacity(0.18), in: Capsule()).overlay(Capsule().stroke(NW.blue.opacity(0.25))) }
                     if session.account != nil {
@@ -195,6 +205,13 @@ struct LibraryView: View {
             Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(NW.muted)
         }.padding(10).premiumPanel(radius: 20)
     }
+    private func libraryMetric(value: Int, label: String, symbol: String) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: symbol).font(.system(size: 15, weight: .semibold)).foregroundStyle(NW.cyan)
+            Text("\(value)").font(.system(size: 22, weight: .bold, design: .rounded))
+            Text(label).font(.system(size: 7, weight: .bold)).tracking(1).foregroundStyle(NW.muted)
+        }.frame(maxWidth: .infinity)
+    }
 }
 
 struct PlaylistPickerView: View {
@@ -236,6 +253,7 @@ struct SearchView: View {
     @State private var onlineTracks: [Track] = []
     @State private var onlineAlbums: [Album] = []
     @State private var selectedAlbum: Album?
+    private let suggestions = ["Ninho", "Saïf", "Tiakola", "Damso", "Gazo", "SCH"]
 
     private var localResults: [Track] {
         library.tracks.filter { track in
@@ -283,13 +301,7 @@ struct SearchView: View {
                         }
                         .frame(maxWidth: .infinity, minHeight: 180)
                     } else if query.trimmingCharacters(in: .whitespaces).isEmpty {
-                        VStack(spacing: 16) {
-                            EmptyLibrary(
-                                symbol: "sparkles",
-                                title: "Explorez tout le son",
-                                description: "Tapez le nom d’un artiste comme Saïf, Ninho ou un titre pour lancer l'écoute et afficher les paroles."
-                            )
-                        }
+                        discoveryLanding
                     } else if onlineTracks.isEmpty && onlineAlbums.isEmpty {
                         EmptyLibrary(
                             symbol: "magnifyingglass",
@@ -358,6 +370,32 @@ struct SearchView: View {
         .scrollBounceBehavior(.always, axes: .vertical)
         .sheet(item: $selectedAlbum) { album in
             AlbumDetailView(album: album)
+        }
+    }
+
+    private var discoveryLanding: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            ZStack(alignment: .bottomLeading) {
+                LinearGradient(colors: [NW.blue.opacity(0.82), NW.violet.opacity(0.60), NW.surface], startPoint: .topLeading, endPoint: .bottomTrailing)
+                Circle().stroke(.white.opacity(0.10), lineWidth: 28).frame(width: 170).offset(x: 210, y: -35)
+                VStack(alignment: .leading, spacing: 11) {
+                    Label("CATALOGUE NEONWAVE", systemImage: "sparkles").font(.system(size: 9, weight: .bold)).tracking(1.6)
+                    Text("Cherchez. Lancez.\nVibrez.").font(.system(size: 29, weight: .bold, design: .rounded)).tracking(-0.9)
+                    Text("Titres, albums, artistes et paroles synchronisées.").font(.caption).foregroundStyle(.white.opacity(0.7))
+                }.padding(22)
+            }.frame(minHeight: 205).clipShape(RoundedRectangle(cornerRadius: 27, style: .continuous)).overlay(RoundedRectangle(cornerRadius: 27).stroke(.white.opacity(0.12)))
+
+            SectionHeading(title: "À découvrir", eyebrow: "RECHERCHES RAPIDES")
+            LazyVGrid(columns: [.init(.flexible()), .init(.flexible()), .init(.flexible())], spacing: 10) {
+                ForEach(suggestions, id: \.self) { name in
+                    Button {
+                        query = name; triggerSearch(name)
+                    } label: {
+                        HStack(spacing: 7) { Image(systemName: "waveform").foregroundStyle(NW.cyan); Text(name).lineLimit(1) }
+                            .font(.caption.bold()).frame(maxWidth: .infinity).padding(.vertical, 13).premiumPanel(radius: 16)
+                    }.buttonStyle(PressStyle())
+                }
+            }
         }
     }
 
