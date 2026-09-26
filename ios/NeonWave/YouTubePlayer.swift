@@ -25,6 +25,7 @@ final class YouTubePlayer: NSObject, ObservableObject, WKScriptMessageHandler, W
 
     override init() {
         super.init()
+        _ = webView
     }
 
     private func setupWebView() {
@@ -34,6 +35,7 @@ final class YouTubePlayer: NSObject, ObservableObject, WKScriptMessageHandler, W
         config.mediaTypesRequiringUserActionForPlayback = []
         config.allowsAirPlayForMediaPlayback = true
         config.suppressesIncrementalRendering = false
+        config.preferences.javaScriptCanOpenWindowsAutomatically = true
 
         let controller = WKUserContentController()
         controller.add(self, name: "neonwaveBridge")
@@ -80,7 +82,8 @@ final class YouTubePlayer: NSObject, ObservableObject, WKScriptMessageHandler, W
                     'disablekb': 1,
                     'fs': 0,
                     'modestbranding': 1,
-                    'rel': 0
+                    'rel': 0,
+                    'origin': 'https://www.youtube-nocookie.com'
                 },
                 events: {
                     'onReady': onPlayerReady,
@@ -117,18 +120,24 @@ final class YouTubePlayer: NSObject, ObservableObject, WKScriptMessageHandler, W
         }
         function playVideoId(id) {
             if (player && typeof player.loadVideoById === 'function') {
-                if (player.unMute) player.unMute();
-                if (player.setVolume) player.setVolume(100);
-                player.loadVideoById({
-                    videoId: id,
-                    startSeconds: 0
-                });
-                player.playVideo();
+                try {
+                    if (player.unMute) player.unMute();
+                    if (player.setVolume) player.setVolume(100);
+                    player.loadVideoById({
+                        videoId: id,
+                        startSeconds: 0
+                    });
+                    player.playVideo();
+                } catch(e) {}
                 setTimeout(function() {
-                    if (player && player.unMute) player.unMute();
-                    if (player && player.setVolume) player.setVolume(100);
-                    if (player && player.playVideo) player.playVideo();
-                }, 350);
+                    try {
+                        if (player && player.unMute) player.unMute();
+                        if (player && player.setVolume) player.setVolume(100);
+                        if (player && player.playVideo) player.playVideo();
+                    } catch(e) {}
+                }, 300);
+            } else {
+                setTimeout(function() { playVideoId(id); }, 150);
             }
         }
         function resume() {

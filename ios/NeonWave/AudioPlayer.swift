@@ -97,6 +97,7 @@ private final class SilentAudioKeepAlive {
     private weak var library: LibraryStore?
     private var resumeAfterInterruption = false
     private var shuffleHistory: [Int] = []
+    private var bufferingWatchdogTask: Task<Void, Never>?
 
     init() {
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.25, preferredTimescale: 600), queue: .main) { [weak self] time in
@@ -175,7 +176,10 @@ private final class SilentAudioKeepAlive {
             Task { @MainActor in
                 guard let self, self.isYouTubeActive else { return }
                 self.isPlaying = playing
-                if playing { self.isBuffering = false }
+                if playing {
+                    self.isBuffering = false
+                    self.bufferingWatchdogTask?.cancel()
+                }
                 self.updateNowPlaying()
             }
         }
@@ -187,13 +191,15 @@ private final class SilentAudioKeepAlive {
             }
         }
 
-        YouTubePlayer.shared.onError = { [weak self] code in
+        YouTubePlayer.shared.onError = { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.isYouTubeActive, let cur = self.current else { return }
-                if code == 100 || code == 101 || code == 150 {
-                    if let stream = cur.streamURL, let url = URL(string: stream) {
-                        self.startAVPlayerFallback(url: url)
-                    }
+                self.bufferingWatchdogTask?.cancel()
+                if let stream = cur.streamURL, let url = URL(string: stream) {
+                    self.startAVPlayerFallback(url: url)
+                } else {
+                    self.error = "Erreur lors de la lecture du titre."
+                    self.pause()
                 }
             }
         }
@@ -323,10 +329,23 @@ private final class SilentAudioKeepAlive {
         isPlaying = false
         isBuffering = true
         updateNowPlaying(includeArtwork: true)
+
+        bufferingWatchdogTask?.cancel()
+        bufferingWatchdogTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(8))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard let self, self.isYouTubeActive, self.isBuffering, !self.isPlaying, let cur = self.current else { return }
+                if let stream = cur.streamURL, let url = URL(string: stream) {
+                    self.startAVPlayerFallback(url: url)
+                }
+            }
+        }
     }
 
     private func startAVPlayerFallback(url: URL, fallbackVideoId: String? = nil) {
         isYouTubeActive = false
+        bufferingWatchdogTask?.cancel()
         SilentAudioKeepAlive.shared.stop()
         YouTubePlayer.shared.stop()
         let item = AVPlayerItem(url: url)
@@ -390,6 +409,7 @@ private final class SilentAudioKeepAlive {
     func toggle() { isPlaying ? pause() : resume() }
 
     func pause() {
+        bufferingWatchdogTask?.cancel()
         if isYouTubeActive {
             YouTubePlayer.shared.pause()
             SilentAudioKeepAlive.shared.pause()
@@ -492,15 +512,22 @@ private final class SilentAudioKeepAlive {
         lyricsOffset = 0
         lyricsRequestedDuration = 0
         setSleep(minutes: nil)
+        bufferingWatchdogTask?.cancel()
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        MPNowPlayingInfoCenter.default().playbackState = .stopped
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
     private func updateNowPlaying(includeArtwork: Bool = false) {
-        guard let current else { return }
+        guard let current else {
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+            MPNowPlayingInfoCenter.default().playbackState = .stopped
+            return
+        }
         var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
         info[MPMediaItemPropertyTitle] = current.title
         info[MPMediaItemPropertyArtist] = current.artist
+        info[MPMediaItemPropertyAlbumTitle] = current.album ?? "NeonWave"
         info[MPMediaItemPropertyPlaybackDuration] = duration
         info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = elapsed
         info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
@@ -521,5 +548,6 @@ private final class SilentAudioKeepAlive {
             }
         }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : (isBuffering ? .interrupted : .paused)
     }
 }

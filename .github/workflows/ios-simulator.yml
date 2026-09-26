@@ -99,6 +99,7 @@ jobs:
             test 2>&1 | tee ios/build/tests.log
 
       - name: Capture the actual iPhone welcome screen
+        continue-on-error: true
         env:
           SIMULATOR_ID: ${{ steps.device.outputs.udid }}
         run: |

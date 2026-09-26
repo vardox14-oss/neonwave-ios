@@ -12,59 +12,60 @@ struct MainView: View {
     @State private var showPlayer = false
     @State private var showSettings = false
     var body: some View {
-        NavigationStack {
-            Group {
-                switch tab {
-                case .home: HomeView(importFiles: { showImport = true })
-                case .search: SearchView()
-                case .library: LibraryView(importFiles: { showImport = true })
-                case .downloads: DownloadsView(importFiles: { showImport = true })
-                }
-            }
-            .background(NW.background).toolbarBackground(NW.background, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    HStack(spacing: 8) { WaveMark(size: 23); Text("neonwave").font(.system(.headline, design: .rounded)).tracking(-0.5) }.foregroundStyle(.white)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showSettings = true } label: {
-                        Text(String((session.account?.username ?? "N").prefix(1)).uppercased()).font(.caption.bold())
-                            .frame(width: 34, height: 34).background(NW.blue.opacity(0.2), in: Circle()).overlay(Circle().stroke(NW.blue.opacity(0.35)))
-                    }.accessibilityLabel("Mon profil et réglages")
-                }
-            }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                VStack(spacing: 0) {
-                    if player.current != nil { MiniPlayer { showPlayer = true }.padding(.horizontal, 12).padding(.bottom, 10) }
-                    HStack(spacing: 0) {
-                        ForEach(LibraryTab.allCases, id: \.self) { item in
-                            Button {
-                                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) { tab = item }; library.haptic()
-                            } label: {
-                                VStack(spacing: 6) {
-                                    Image(systemName: item.symbol).font(.system(size: 20, weight: .medium))
-                                    Text(item.rawValue).font(.system(size: 9, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.8)
-                                }.foregroundStyle(tab == item ? NW.blue : NW.muted).frame(maxWidth: .infinity).frame(minHeight: 55)
-                            }.accessibilityAddTraits(tab == item ? .isSelected : [])
-                        }
-                    }.padding(.horizontal, 8).padding(.top, 4)
-                }.background(.ultraThinMaterial)
-            }
-        }
-        .fileImporter(isPresented: $showImport, allowedContentTypes: [.audio], allowsMultipleSelection: true) { result in
-            switch result { case .success(let urls): Task { await library.importFiles(urls) }; case .failure(let error): library.message = error.localizedDescription }
-        }
-        .overlay(alignment: .top) {
-            if library.importing { Label("Import de vos titres…", systemImage: "waveform").font(.caption.bold()).padding(14).background(.ultraThinMaterial, in: Capsule()).padding(.top, 55) }
-        }
-        .overlay(alignment: .bottomTrailing) {
+        ZStack {
             YouTubePlayerWebView()
                 .frame(width: 320, height: 240)
-                .offset(x: -9999, y: -9999)
                 .allowsHitTesting(false)
+                .accessibilityHidden(true)
+
+            NavigationStack {
+                Group {
+                    switch tab {
+                    case .home: HomeView(importFiles: { showImport = true })
+                    case .search: SearchView()
+                    case .library: LibraryView(importFiles: { showImport = true })
+                    case .downloads: DownloadsView(importFiles: { showImport = true })
+                    }
+                }
+                .background(NW.background).toolbarBackground(NW.background, for: .navigationBar)
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        HStack(spacing: 8) { WaveMark(size: 23); Text("neonwave").font(.system(.headline, design: .rounded)).tracking(-0.5) }.foregroundStyle(.white)
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { showSettings = true } label: {
+                            Text(String((session.account?.username ?? "N").prefix(1)).uppercased()).font(.caption.bold())
+                                .frame(width: 34, height: 34).background(NW.blue.opacity(0.2), in: Circle()).overlay(Circle().stroke(NW.blue.opacity(0.35)))
+                        }.accessibilityLabel("Mon profil et réglages")
+                    }
+                }
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    VStack(spacing: 0) {
+                        if player.current != nil { MiniPlayer { showPlayer = true }.padding(.horizontal, 12).padding(.bottom, 10) }
+                        HStack(spacing: 0) {
+                            ForEach(LibraryTab.allCases, id: \.self) { item in
+                                Button {
+                                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) { tab = item }; library.haptic()
+                                } label: {
+                                    VStack(spacing: 6) {
+                                        Image(systemName: item.symbol).font(.system(size: 20, weight: .medium))
+                                        Text(item.rawValue).font(.system(size: 9, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.8)
+                                    }.foregroundStyle(tab == item ? NW.blue : NW.muted).frame(maxWidth: .infinity).frame(minHeight: 55)
+                                }.accessibilityAddTraits(tab == item ? .isSelected : [])
+                            }
+                        }.padding(.horizontal, 8).padding(.top, 4)
+                    }.background(.ultraThinMaterial)
+                }
+            }
+            .fileImporter(isPresented: $showImport, allowedContentTypes: [.audio], allowsMultipleSelection: true) { result in
+                switch result { case .success(let urls): Task { await library.importFiles(urls) }; case .failure(let error): library.message = error.localizedDescription }
+            }
+            .overlay(alignment: .top) {
+                if library.importing { Label("Import de vos titres…", systemImage: "waveform").font(.caption.bold()).padding(14).background(.ultraThinMaterial, in: Capsule()).padding(.top, 55) }
+            }
+            .fullScreenCover(isPresented: $showPlayer) { PlayerView() }
+            .sheet(isPresented: $showSettings) { SettingsView() }
         }
-        .fullScreenCover(isPresented: $showPlayer) { PlayerView() }
-        .sheet(isPresented: $showSettings) { SettingsView() }
     }
 }
 

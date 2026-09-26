@@ -19,10 +19,10 @@ struct MiniPlayer: View {
                 HStack(spacing: 12) {
                     Button(action: open) {
                         HStack(spacing: 12) {
-                            CoverArt(track: track, imageURL: library.artworkURL(track), remoteURL: track.artworkURL, radius: 10).frame(width: 44)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(track.title).font(.caption.bold()).lineLimit(1)
-                                Text(player.isBuffering ? "Connexion au son…" : track.artist).font(.caption2).foregroundStyle(player.isBuffering ? NW.blue : NW.muted).lineLimit(1)
+                            CoverArt(track: track, imageURL: library.artworkURL(track), remoteURL: track.artworkURL, radius: 10).frame(width: 44, height: 44)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(track.title).font(.system(size: 13, weight: .bold)).lineLimit(1).foregroundStyle(.white)
+                                Text(player.isBuffering ? "Connexion au son…" : track.artist).font(.system(size: 11, weight: .medium)).foregroundStyle(player.isBuffering ? NW.blue : NW.muted).lineLimit(1)
                             }.frame(maxWidth: .infinity, alignment: .leading)
                         }.contentShape(Rectangle())
                     }.buttonStyle(.plain)
