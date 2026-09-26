@@ -1,0 +1,111 @@
+name: iPhone simulator for Appetize
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["codex/ios-browser-preview"]
+    paths: ["ios/**", ".github/workflows/ios-simulator.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-simulator-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  simulator:
+    runs-on: macos-15
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out the native iPhone project
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Build the real SwiftUI app for the ARM iOS Simulator
+        run: |
+          set -euo pipefail
+          mkdir -p ios/build
+          xcodebuild -version
+          xcodebuild \
+            -project ios/NeonWave.xcodeproj \
+            -scheme NeonWave \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath ios/DerivedData \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            build 2>&1 | tee ios/build/xcodebuild.log
+
+      - name: Package the simulator app for Appetize
+        run: |
+          set -euo pipefail
+          APP_PATH=ios/DerivedData/Build/Products/Debug-iphonesimulator/NeonWave.app
+          test -d "$APP_PATH"
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent \
+            "$APP_PATH" ios/build/NeonWave-iOS-Simulator.zip
+
+      - name: Select an available iPhone simulator
+        id: device
+        run: |
+          set -euo pipefail
+          xcrun simctl list devices available --json > ios/build/devices.json
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          data = json.loads(Path('ios/build/devices.json').read_text())
+          phones = [device for runtime, devices in data['devices'].items()
+                    if '.iOS-' in runtime for device in devices
+                    if device.get('isAvailable') and device['name'].startswith('iPhone')]
+          if not phones:
+              raise SystemExit('No installed iPhone simulator was found.')
+          device = phones[-1]
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('udid=' + device['udid'] + '\n')
+          print('Selected simulator: ' + device['name'])
+          PY
+
+      - name: Run the native library tests
+        env:
+          SIMULATOR_ID: ${{ steps.device.outputs.udid }}
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project ios/NeonWave.xcodeproj \
+            -scheme NeonWave \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
+            -derivedDataPath ios/DerivedData \
+            -resultBundlePath ios/build/NeonWaveTests.xcresult \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            test 2>&1 | tee ios/build/tests.log
+
+      - name: Capture the actual iPhone welcome screen
+        env:
+          SIMULATOR_ID: ${{ steps.device.outputs.udid }}
+        run: |
+          set -euo pipefail
+          xcrun simctl bootstatus "$SIMULATOR_ID" -b
+          xcrun simctl install "$SIMULATOR_ID" ios/DerivedData/Build/Products/Debug-iphonesimulator/NeonWave.app
+          xcrun simctl launch --terminate-running-process "$SIMULATOR_ID" app.neonwave.ios
+          sleep 5
+          xcrun simctl io "$SIMULATOR_ID" screenshot ios/build/NeonWave-iPhone.png
+
+      - name: Save the Appetize ZIP and build evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: NeonWave-iOS-Simulator
+          path: |
+            ios/build/NeonWave-iOS-Simulator.zip
+            ios/build/NeonWave-iPhone.png
+            ios/build/xcodebuild.log
+            ios/build/tests.log
+            ios/build/NeonWaveTests.xcresult
+          if-no-files-found: warn
+          retention-days: 7

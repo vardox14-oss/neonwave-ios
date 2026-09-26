@@ -1,0 +1,8 @@
+// Public deployment values only. Never put provider secrets in the app.
+// $() keeps the slashes from being parsed as an xcconfig comment.
+NEONWAVE_API_URL = https:/$()/api.neonwave.example
+NEONWAVE_PRIVACY_URL = https:/$()/neonwave.example/privacy
+NEONWAVE_SUPPORT_URL = https:/$()/neonwave.example/support
+PRODUCT_BUNDLE_IDENTIFIER = app.neonwave.ios
+DEVELOPMENT_TEAM =
+#include? "Local.xcconfig"

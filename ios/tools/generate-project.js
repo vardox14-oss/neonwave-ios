@@ -1,0 +1,48 @@
+// Deterministic Xcode project; no XcodeGen, CocoaPods or third-party iOS dependency.
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const root = path.resolve(__dirname, '..');
+const id = name => crypto.createHash('sha1').update(name).digest('hex').slice(0, 24).toUpperCase();
+const q = value => JSON.stringify(value);
+const objects = [];
+const add = (name, content) => { objects.push(`${id(name)} = { ${content} };`); return id(name); };
+const swift = fs.readdirSync(path.join(root, 'NeonWave')).filter(file => file.endsWith('.swift')).sort();
+const tests = fs.readdirSync(path.join(root, 'NeonWaveTests')).filter(file => file.endsWith('.swift')).sort();
+function file(filePath, type) { return add(`file:${filePath}`, `isa = PBXFileReference; lastKnownFileType = ${type}; path = ${q(filePath)}; sourceTree = "<group>";`); }
+function build(filePath) { return add(`build:${filePath}`, `isa = PBXBuildFile; fileRef = ${id(`file:${filePath}`)};`); }
+const sources = swift.map(name => `NeonWave/${name}`);
+const testSources = tests.map(name => `NeonWaveTests/${name}`);
+const resources = ['NeonWave/Assets.xcassets', 'NeonWave/PrivacyInfo.xcprivacy'];
+const refs = [...sources, ...testSources].map(name => file(name, 'sourcecode.swift'));
+refs.push(file(resources[0], 'folder.assetcatalog'), file(resources[1], 'text.xml'));
+refs.push(file('NeonWave/Info.plist', 'text.plist.xml'), file('NeonWave/NeonWave.entitlements', 'text.plist.entitlements'), file('Configuration.xcconfig', 'text.xcconfig'));
+const appProduct = add('appProduct', 'isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NeonWave.app; sourceTree = BUILT_PRODUCTS_DIR;');
+const testProduct = add('testProduct', 'isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NeonWaveTests.xctest; sourceTree = BUILT_PRODUCTS_DIR;');
+add('products', `isa = PBXGroup; children = (${appProduct}, ${testProduct}); name = Products; sourceTree = "<group>";`);
+add('rootGroup', `isa = PBXGroup; children = (${refs.join(', ')}, ${id('products')}); sourceTree = "<group>";`);
+add('sources', `isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (${sources.map(build).join(', ')}); runOnlyForDeploymentPostprocessing = 0;`);
+add('testSources', `isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (${testSources.map(build).join(', ')}); runOnlyForDeploymentPostprocessing = 0;`);
+add('resources', `isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (${resources.map(build).join(', ')}); runOnlyForDeploymentPostprocessing = 0;`);
+add('frameworks', 'isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;');
+add('testFrameworks', 'isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;');
+const validation = 'if [ "$CONFIGURATION" = "Release" ]; then\n  for value in "$NEONWAVE_API_URL" "$NEONWAVE_PRIVACY_URL" "$NEONWAVE_SUPPORT_URL"; do\n    case "$value" in *example*|"" ) echo "error: Configure production URLs in ios/Local.xcconfig before archiving."; exit 1;; esac\n  done\n  if [ -z "$DEVELOPMENT_TEAM" ]; then echo "error: Select your Apple Developer team before archiving."; exit 1; fi\nfi\n';
+add('validate', `isa = PBXShellScriptBuildPhase; buildActionMask = 2147483647; files = (); inputPaths = (); outputPaths = (); name = "Validate App Store configuration"; runOnlyForDeploymentPostprocessing = 0; shellPath = /bin/sh; shellScript = ${q(validation)}; alwaysOutOfDate = 1;`);
+add('proxy', `isa = PBXContainerItemProxy; containerPortal = ${id('project')}; proxyType = 1; remoteGlobalIDString = ${id('appTarget')}; remoteInfo = NeonWave;`);
+add('dependency', `isa = PBXTargetDependency; target = ${id('appTarget')}; targetProxy = ${id('proxy')};`);
+add('appTarget', `isa = PBXNativeTarget; buildConfigurationList = ${id('appConfigs')}; buildPhases = (${id('validate')}, ${id('sources')}, ${id('frameworks')}, ${id('resources')}); buildRules = (); dependencies = (); name = NeonWave; productName = NeonWave; productReference = ${appProduct}; productType = "com.apple.product-type.application";`);
+add('testTarget', `isa = PBXNativeTarget; buildConfigurationList = ${id('testConfigs')}; buildPhases = (${id('testSources')}, ${id('testFrameworks')}); buildRules = (); dependencies = (${id('dependency')}); name = NeonWaveTests; productName = NeonWaveTests; productReference = ${testProduct}; productType = "com.apple.product-type.bundle.unit-test";`);
+for (const mode of ['Debug', 'Release']) {
+    const debug = mode === 'Debug';
+    add(`project${mode}`, `isa = XCBuildConfiguration; buildSettings = { CLANG_ENABLE_MODULES = YES; SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SWIFT_VERSION = 5.0; SWIFT_STRICT_CONCURRENCY = targeted; DEBUG_INFORMATION_FORMAT = ${debug ? 'dwarf' : '"dwarf-with-dsym"'}; ENABLE_TESTABILITY = ${debug ? 'YES' : 'NO'}; SWIFT_OPTIMIZATION_LEVEL = ${q(debug ? '-Onone' : '-O')}; SWIFT_ACTIVE_COMPILATION_CONDITIONS = ${q(debug ? 'DEBUG $(inherited)' : '$(inherited)')}; }; name = ${mode};`);
+    add(`app${mode}`, `isa = XCBuildConfiguration; baseConfigurationReference = ${id('file:Configuration.xcconfig')}; buildSettings = { PRODUCT_NAME = "$(TARGET_NAME)"; INFOPLIST_FILE = NeonWave/Info.plist; GENERATE_INFOPLIST_FILE = NO; CODE_SIGN_STYLE = Automatic; CODE_SIGN_ENTITLEMENTS = NeonWave/NeonWave.entitlements; TARGETED_DEVICE_FAMILY = 1; SUPPORTS_MACCATALYST = NO; SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO; ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; MARKETING_VERSION = 1.0.0; CURRENT_PROJECT_VERSION = 1; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks"); }; name = ${mode};`);
+    add(`test${mode}`, `isa = XCBuildConfiguration; buildSettings = { PRODUCT_NAME = "$(TARGET_NAME)"; PRODUCT_BUNDLE_IDENTIFIER = app.neonwave.ios.tests; GENERATE_INFOPLIST_FILE = YES; CODE_SIGN_STYLE = Automatic; TARGETED_DEVICE_FAMILY = 1; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/NeonWave.app/NeonWave"; BUNDLE_LOADER = "$(TEST_HOST)"; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@loader_path/Frameworks"); }; name = ${mode};`);
+}
+for (const target of ['project', 'app', 'test']) add(`${target}Configs`, `isa = XCConfigurationList; buildConfigurations = (${id(`${target}Debug`)}, ${id(`${target}Release`)}); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;`);
+add('project', `isa = PBXProject; attributes = { BuildIndependentTargetsInParallel = YES; LastUpgradeCheck = 1600; TargetAttributes = { ${id('appTarget')} = { CreatedOnToolsVersion = 16.0; SystemCapabilities = { com.apple.SignInWithApple = { enabled = 1; }; com.apple.BackgroundModes = { enabled = 1; }; }; }; ${id('testTarget')} = { CreatedOnToolsVersion = 16.0; TestTargetID = ${id('appTarget')}; }; }; }; buildConfigurationList = ${id('projectConfigs')}; compatibilityVersion = "Xcode 14.0"; developmentRegion = fr; hasScannedForEncodings = 0; knownRegions = (fr, en, Base); mainGroup = ${id('rootGroup')}; productRefGroup = ${id('products')}; projectDirPath = ""; projectRoot = ""; targets = (${id('appTarget')}, ${id('testTarget')});`);
+const destination = path.join(root, 'NeonWave.xcodeproj');
+fs.mkdirSync(path.join(destination, 'xcshareddata', 'xcschemes'), { recursive: true });
+fs.writeFileSync(path.join(destination, 'project.pbxproj'), `// !$*UTF8*$!\n{ archiveVersion = 1; classes = {}; objectVersion = 56; objects = {\n${objects.join('\n')}\n}; rootObject = ${id('project')}; }\n`);
+const ref = (target, product) => `<BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="${id(target)}" BuildableName="${product}" BlueprintName="${product.split('.')[0]}" ReferencedContainer="container:NeonWave.xcodeproj"/>`;
+fs.writeFileSync(path.join(destination, 'xcshareddata', 'xcschemes', 'NeonWave.xcscheme'), `<?xml version="1.0" encoding="UTF-8"?>\n<Scheme LastUpgradeVersion="1600" version="1.3"><BuildAction parallelizeBuildables="YES" buildImplicitDependencies="YES"><BuildActionEntries><BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="YES" buildForArchiving="YES" buildForAnalyzing="YES">${ref('appTarget', 'NeonWave.app')}</BuildActionEntry></BuildActionEntries></BuildAction><TestAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.IDEFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv="YES"><Testables><TestableReference skipped="NO">${ref('testTarget', 'NeonWaveTests.xctest')}</TestableReference></Testables></TestAction><LaunchAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.IDEFoundation.Launcher.LLDB" launchStyle="0" useCustomWorkingDirectory="NO" ignoresPersistentStateOnLaunch="NO" debugDocumentVersioning="YES" debugServiceExtension="internal" allowLocationSimulation="YES"><BuildableProductRunnable runnableDebuggingMode="0">${ref('appTarget', 'NeonWave.app')}</BuildableProductRunnable></LaunchAction><ProfileAction buildConfiguration="Release" shouldUseLaunchSchemeArgsEnv="YES" savedToolIdentifier="" useCustomWorkingDirectory="NO" debugDocumentVersioning="YES"><BuildableProductRunnable runnableDebuggingMode="0">${ref('appTarget', 'NeonWave.app')}</BuildableProductRunnable></ProfileAction><AnalyzeAction buildConfiguration="Debug"/><ArchiveAction buildConfiguration="Release" revealArchiveInOrganizer="YES"/></Scheme>\n`);
+console.log(`Generated Xcode project with ${sources.length} Swift sources and ${testSources.length} test files.`);
