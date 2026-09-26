@@ -16,15 +16,19 @@ final class YouTubePlayer: NSObject, ObservableObject, WKScriptMessageHandler, W
     var onEnded: (() -> Void)?
     var onError: ((Int) -> Void)?
 
-    private(set) var webView: WKWebView!
+    private var backingWebView: WKWebView?
+    var webView: WKWebView {
+        if backingWebView == nil { setupWebView() }
+        return backingWebView!
+    }
     private var pendingVideoId: String?
 
     override init() {
         super.init()
-        setupWebView()
     }
 
     private func setupWebView() {
+        guard backingWebView == nil else { return }
         let config = WKWebViewConfiguration()
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
@@ -37,7 +41,7 @@ final class YouTubePlayer: NSObject, ObservableObject, WKScriptMessageHandler, W
 
         let wv = WKWebView(frame: .init(x: 0, y: 0, width: 320, height: 240), configuration: config)
         wv.navigationDelegate = self
-        self.webView = wv
+        self.backingWebView = wv
         loadHTML()
     }
 
@@ -168,6 +172,7 @@ final class YouTubePlayer: NSObject, ObservableObject, WKScriptMessageHandler, W
 
     func playVideo(_ videoId: String) {
         currentVideoId = videoId
+        _ = webView
         guard isReady else {
             pendingVideoId = videoId
             return
@@ -177,17 +182,18 @@ final class YouTubePlayer: NSObject, ObservableObject, WKScriptMessageHandler, W
 
     func resume() {
         isPlaying = true
+        _ = webView
         webView.evaluateJavaScript("resume();")
     }
 
     func pause() {
         isPlaying = false
-        webView.evaluateJavaScript("pause();")
+        backingWebView?.evaluateJavaScript("pause();")
     }
 
     func seek(to seconds: Double) {
         currentTime = seconds
-        webView.evaluateJavaScript("seek(\(seconds));")
+        backingWebView?.evaluateJavaScript("seek(\(seconds));")
     }
 
     func stop() {
