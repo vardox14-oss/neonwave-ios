@@ -12,15 +12,17 @@ struct Track: Identifiable, Codable, Hashable {
     var artworkURL: String?
     var streamURL: String?
     var videoId: String?
+    var spotifyId: String?
     var addedAt: Date
     var playCount: Int
     var lastPlayedAt: Date?
 
-    init(id: String = UUID().uuidString, title: String, artist: String = "Artiste inconnu", duration: Double = 0, fileName: String? = nil, remoteID: String? = nil, artworkFile: String? = nil, album: String? = nil, artworkURL: String? = nil, streamURL: String? = nil, videoId: String? = nil) {
+    init(id: String = UUID().uuidString, title: String, artist: String = "Artiste inconnu", duration: Double = 0, fileName: String? = nil, remoteID: String? = nil, artworkFile: String? = nil, album: String? = nil, artworkURL: String? = nil, streamURL: String? = nil, videoId: String? = nil, spotifyId: String? = nil) {
         self.id = id; self.title = title; self.artist = artist; self.duration = duration
         self.fileName = fileName; self.remoteID = remoteID; self.artworkFile = artworkFile
         self.album = album; self.artworkURL = artworkURL; self.streamURL = streamURL
         self.videoId = videoId
+        self.spotifyId = spotifyId
         self.addedAt = Date(); self.playCount = 0
     }
     var colorIndex: Int { id.utf8.reduce(0) { ($0 + Int($1)) % 6 } }

@@ -79,6 +79,7 @@ private final class SilentAudioKeepAlive {
     @Published private(set) var plainLyrics: String?
     @Published private(set) var activeLyricIndex: Int?
     @Published private(set) var loadingLyrics = false
+    @Published private(set) var lyricsOffset: Double = 0
 
     private let player = AVPlayer()
     private var isYouTubeActive = false
@@ -89,6 +90,7 @@ private final class SilentAudioKeepAlive {
     private var observers: [NSObjectProtocol] = []
     private var sleepTask: Task<Void, Never>?
     private var lyricsTask: Task<Void, Never>?
+    private var lyricsRequestedDuration: Double = 0
     private var index = 0
     private weak var library: LibraryStore?
     private var resumeAfterInterruption = false
@@ -101,9 +103,7 @@ private final class SilentAudioKeepAlive {
                 self.elapsed = time.seconds.isFinite ? time.seconds : 0
                 let length = self.player.currentItem?.duration.seconds ?? 0
                 if length.isFinite && length > 0 { self.duration = length }
-                if !self.lyrics.isEmpty {
-                    self.activeLyricIndex = self.lyrics.lastIndex(where: { $0.time <= self.elapsed })
-                }
+                self.updateActiveLyric()
                 self.updateNowPlaying()
             }
         }
@@ -151,12 +151,13 @@ private final class SilentAudioKeepAlive {
             Task { @MainActor in
                 guard let self, self.isYouTubeActive else { return }
                 self.elapsed = cur
-                if dur > 0 && (self.duration == 0 || self.duration < 40 || dur > self.duration) {
+                if dur > 0 {
                     self.duration = dur
+                    if abs(self.lyricsRequestedDuration - dur) > 2 {
+                        self.fetchLyricsForCurrent(preferredDuration: dur)
+                    }
                 }
-                if !self.lyrics.isEmpty {
-                    self.activeLyricIndex = self.lyrics.lastIndex(where: { $0.time <= self.elapsed })
-                }
+                self.updateActiveLyric()
                 self.updateNowPlaying()
             }
         }
@@ -226,9 +227,9 @@ private final class SilentAudioKeepAlive {
 
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
         try? AVAudioSession.sharedInstance().setActive(true)
-        current = target; elapsed = 0; duration = target.duration
+        current = target; elapsed = 0; duration = target.duration; lyricsOffset = 0; lyricsRequestedDuration = 0
 
-        fetchLyricsForCurrent()
+        fetchLyricsForCurrent(preferredDuration: target.duration)
         updateNowPlaying(includeArtwork: true)
 
         // 1. If downloaded / imported locally, use native AVPlayer
@@ -258,7 +259,7 @@ private final class SilentAudioKeepAlive {
         } else {
             resolveTask = Task { [weak self] in
                 guard let self else { return }
-                let vid = await MusicCatalogService.resolveYouTubeId(title: target.title, artist: target.artist)
+                let vid = await MusicCatalogService.resolveYouTubeId(title: target.title, artist: target.artist, duration: target.duration, spotifyId: target.spotifyId)
                 Task { @MainActor in
                     guard self.current?.id == target.id else { return }
                     if let vid {
@@ -300,22 +301,42 @@ private final class SilentAudioKeepAlive {
         updateNowPlaying(includeArtwork: true)
     }
 
-    private func fetchLyricsForCurrent() {
+    private func fetchLyricsForCurrent(preferredDuration: Double) {
         lyricsTask?.cancel()
         guard let current else {
             lyrics = []; plainLyrics = nil; activeLyricIndex = nil; loadingLyrics = false; return
         }
+        lyricsRequestedDuration = preferredDuration
         loadingLyrics = true; lyrics = []; plainLyrics = nil; activeLyricIndex = nil
         lyricsTask = Task { [weak self] in
-            let result = await LyricsService.fetchLyrics(title: current.title, artist: current.artist, duration: current.duration)
+            let result = await LyricsService.fetchLyrics(title: current.title, artist: current.artist, duration: preferredDuration)
+            guard !Task.isCancelled else { return }
             Task { @MainActor in
                 guard let self, self.current?.id == current.id else { return }
                 self.lyrics = result.lines
                 self.plainLyrics = result.plain
                 self.loadingLyrics = false
+                self.updateActiveLyric()
             }
         }
     }
+
+    private func updateActiveLyric() {
+        guard !lyrics.isEmpty else { activeLyricIndex = nil; return }
+        activeLyricIndex = lyrics.lastIndex(where: { $0.time + lyricsOffset <= elapsed })
+    }
+
+    func adjustLyricsOffset(by delta: Double) {
+        lyricsOffset = min(10, max(-10, lyricsOffset + delta))
+        updateActiveLyric()
+    }
+
+    func resetLyricsOffset() {
+        lyricsOffset = 0
+        updateActiveLyric()
+    }
+
+    func seek(to lyric: LyricLine) { seek(lyric.time + lyricsOffset) }
 
     func toggle() { isPlaying ? pause() : resume() }
 
@@ -356,9 +377,7 @@ private final class SilentAudioKeepAlive {
         } else {
             player.seek(to: CMTime(seconds: targetTime, preferredTimescale: 600))
         }
-        if !lyrics.isEmpty {
-            activeLyricIndex = lyrics.lastIndex(where: { $0.time <= targetTime })
-        }
+        updateActiveLyric()
         updateNowPlaying()
     }
 
@@ -415,6 +434,8 @@ private final class SilentAudioKeepAlive {
         lyrics = []
         plainLyrics = nil
         activeLyricIndex = nil
+        lyricsOffset = 0
+        lyricsRequestedDuration = 0
         setSleep(minutes: nil)
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)

@@ -54,17 +54,21 @@ enum Keychain {
 
 struct APIClient {
     var token: String? { Keychain.read("token").flatMap { String(data: $0, encoding: .utf8) } }
-    func request(_ path: String, method: String = "GET", body: [String: Any]? = nil, authenticated: Bool = true) throws -> URLRequest {
+    func request(_ path: String, method: String = "GET", body: [String: Any]? = nil, authenticated: Bool = true, queryItems: [URLQueryItem] = []) throws -> URLRequest {
         guard let base = AppConfiguration.apiURL else { throw MessageError("La connexion aux comptes sera disponible après configuration du service NeonWave. Votre bibliothèque locale reste accessible.") }
-        var request = URLRequest(url: base.appendingPathComponent(path))
+        let url = path.split(separator: "/").reduce(base) { $0.appendingPathComponent(String($1)) }
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        if !queryItems.isEmpty { components?.queryItems = queryItems }
+        guard let finalURL = components?.url else { throw URLError(.badURL) }
+        var request = URLRequest(url: finalURL)
         request.httpMethod = method; request.timeoutInterval = 30; request.httpShouldHandleCookies = false
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if authenticated, let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         if let body { request.httpBody = try JSONSerialization.data(withJSONObject: body) }
         return request
     }
-    func call<T: Decodable>(_ path: String, method: String = "GET", body: [String: Any]? = nil, authenticated: Bool = true) async throws -> T {
-        let request = try request(path, method: method, body: body, authenticated: authenticated)
+    func call<T: Decodable>(_ path: String, method: String = "GET", body: [String: Any]? = nil, authenticated: Bool = true, queryItems: [URLQueryItem] = []) async throws -> T {
+        let request = try request(path, method: method, body: body, authenticated: authenticated, queryItems: queryItems)
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let response = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
         guard (200..<300).contains(response.statusCode) else {

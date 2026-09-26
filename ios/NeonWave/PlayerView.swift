@@ -87,7 +87,7 @@ struct PlayerView: View {
                                 LyricsView(player: player)
                                     .padding(.vertical, 6)
                             case .canvas:
-                                CanvasVisualizerView(color: NW.colors[track.colorIndex][0], isPlaying: player.isPlaying)
+                                SpotifyCanvasView(track: track, isPlaying: player.isPlaying)
                                     .padding(.vertical, 6)
                             }
                         }
@@ -161,10 +161,27 @@ struct LyricsView: View {
                         }
                         .frame(maxWidth: .infinity, minHeight: 260)
                     } else if !player.lyrics.isEmpty {
+                        HStack(spacing: 10) {
+                            Label("PAROLES SYNCHRONISÉES", systemImage: "waveform")
+                                .font(.system(size: 9, weight: .bold)).tracking(1.2).foregroundStyle(NW.blue)
+                            Spacer()
+                            Button { player.adjustLyricsOffset(by: -0.5) } label: { Image(systemName: "minus") }
+                                .accessibilityLabel("Afficher les paroles plus tôt")
+                            Button { player.resetLyricsOffset() } label: {
+                                Text(String(format: "%+.1f s", player.lyricsOffset)).font(.caption.monospacedDigit()).frame(minWidth: 48)
+                            }
+                            .accessibilityLabel("Réinitialiser le calage des paroles")
+                            Button { player.adjustLyricsOffset(by: 0.5) } label: { Image(systemName: "plus") }
+                                .accessibilityLabel("Afficher les paroles plus tard")
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.white)
+                        .padding(.bottom, 8)
+
                         ForEach(Array(player.lyrics.enumerated()), id: \.element.id) { index, line in
                             let isActive = index == (player.activeLyricIndex ?? -1)
                             Button {
-                                player.seek(line.time)
+                                player.seek(to: line)
                             } label: {
                                 Text(line.text)
                                     .font(.system(size: isActive ? 22 : 17, weight: isActive ? .bold : .medium, design: .rounded))
@@ -196,7 +213,7 @@ struct LyricsView: View {
                 .padding(.vertical, 20)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(height: 310)
+            .frame(height: 360)
             .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 24))
             .onChange(of: player.activeLyricIndex) { _, newIndex in
                 if let newIndex {
@@ -205,57 +222,6 @@ struct LyricsView: View {
                     }
                 }
             }
-        }
-    }
-}
-
-struct CanvasVisualizerView: View {
-    let color: Color
-    let isPlaying: Bool
-
-    var body: some View {
-        TimelineView(.animation(paused: !isPlaying)) { timeline in
-            let date = timeline.date.timeIntervalSinceReferenceDate
-            ZStack {
-                RadialGradient(
-                    colors: [color.opacity(0.4), NW.blue.opacity(0.15), .clear],
-                    center: .center,
-                    startRadius: 20,
-                    endRadius: 220
-                )
-
-                ForEach(0..<4) { i in
-                    let offset = Double(i) * 0.7
-                    let scale = 1.0 + sin(date * 1.6 + offset) * 0.08
-                    let opacity = 0.28 + cos(date * 2.0 + offset) * 0.14
-
-                    Circle()
-                        .stroke(
-                            LinearGradient(
-                                colors: [color.opacity(opacity), NW.blue.opacity(opacity * 0.7), .clear],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: CGFloat(16 + i * 12)
-                        )
-                        .scaleEffect(scale)
-                        .rotationEffect(.degrees(date * Double(12 + i * 6)))
-                        .frame(width: CGFloat(140 + i * 44), height: CGFloat(140 + i * 44))
-                }
-
-                HStack(spacing: 7) {
-                    ForEach(0..<9) { bar in
-                        let heightFactor = max(0.2, sin(date * 4.0 + Double(bar) * 0.75) * 0.5 + 0.5)
-                        Capsule()
-                            .fill(LinearGradient(colors: [.white, color, NW.blue], startPoint: .top, endPoint: .bottom))
-                            .frame(width: 6, height: CGFloat(28 + heightFactor * 105))
-                            .shadow(color: color.opacity(0.6), radius: 8)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 310)
-            .clipShape(RoundedRectangle(cornerRadius: 24))
         }
     }
 }

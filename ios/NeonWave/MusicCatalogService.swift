@@ -1,6 +1,27 @@
 import Foundation
 
 enum MusicCatalogService {
+    private struct ServerSearchResponse: Decodable {
+        struct Item: Decodable {
+            let id: String?
+            let videoId: String?
+            let spotifyId: String?
+            let title: String
+            let artist: String
+            let album: String?
+            let thumbnail: String?
+            let duration: Double?
+            let durationMs: Double?
+            let streamUrl: String?
+        }
+        let items: [Item]
+    }
+
+    private struct ResolveResponse: Decodable {
+        let videoId: String
+        let duration: Double?
+    }
+
     private struct DeezerSearchResponse: Decodable {
         struct Item: Decodable {
             let id: Int
@@ -64,6 +85,30 @@ enum MusicCatalogService {
     static func searchTracks(_ query: String) async -> [Track] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return [] }
+
+        // Same Spotify-first catalogue as the desktop app. Keeping spotifyId is
+        // essential: it is also the key used to request the real Spotify Canvas.
+        if AppConfiguration.apiURL != nil,
+           let response: ServerSearchResponse = try? await APIClient().call(
+                "api/music/search",
+                queryItems: [URLQueryItem(name: "q", value: trimmed), URLQueryItem(name: "filter", value: "music")]
+           ), !response.items.isEmpty {
+            return response.items.map { item in
+                let duration = item.duration ?? ((item.durationMs ?? 0) / 1000)
+                let stableID = item.spotifyId.map { "sp-\($0)" } ?? item.videoId.map { "yt-\($0)" } ?? item.id ?? UUID().uuidString
+                return Track(
+                    id: stableID,
+                    title: item.title,
+                    artist: item.artist,
+                    duration: duration,
+                    album: item.album,
+                    artworkURL: item.thumbnail,
+                    streamURL: item.streamUrl,
+                    videoId: item.videoId,
+                    spotifyId: item.spotifyId
+                )
+            }
+        }
 
         // 1. Try Deezer API
         if let url = URL(string: "https://api.deezer.com/search?q=\(encoded)&limit=30") {
@@ -169,9 +214,22 @@ enum MusicCatalogService {
 
     private static var ytCache: [String: String] = [:]
 
-    static func resolveYouTubeId(title: String, artist: String) async -> String? {
+    static func resolveYouTubeId(title: String, artist: String, duration: Double = 0, spotifyId: String? = nil) async -> String? {
         let key = "\(artist.lowercased())|\(title.lowercased())"
         if let cached = ytCache[key] { return cached }
+
+        if AppConfiguration.apiURL != nil {
+            let path = spotifyId.map { "api/music/resolve/\($0)" } ?? "api/music/resolve-by-metadata"
+            let query = [
+                URLQueryItem(name: "title", value: title),
+                URLQueryItem(name: "artist", value: artist),
+                URLQueryItem(name: "durationMs", value: String(Int(duration * 1000)))
+            ]
+            if let resolved: ResolveResponse = try? await APIClient().call(path, queryItems: query), !resolved.videoId.isEmpty {
+                ytCache[key] = resolved.videoId
+                return resolved.videoId
+            }
+        }
 
         let cleanTitle = title
             .replacingOccurrences(of: "(feat.", with: "")

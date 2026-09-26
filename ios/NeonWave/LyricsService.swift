@@ -1,67 +1,115 @@
 import Foundation
 
+struct LyricsResult {
+    let lines: [LyricLine]
+    let plain: String?
+    let sourceDuration: Double?
+}
+
 enum LyricsService {
-    private struct LRCLIBResponse: Decodable {
+    struct LRCLIBResponse: Decodable {
+        let trackName: String?
+        let artistName: String?
+        let duration: Double?
         let plainLyrics: String?
         let syncedLyrics: String?
     }
 
-    static func fetchLyrics(title: String, artist: String, duration: Double? = nil) async -> (lines: [LyricLine], plain: String?) {
-        guard let encodedTitle = title.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let encodedArtist = artist.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
-            return ([], nil)
-        }
-
-        var urlString = "https://lrclib.net/api/get?track_name=\(encodedTitle)&artist_name=\(encodedArtist)"
-        if let duration, duration > 0 {
-            urlString += "&duration=\(Int(duration))"
-        }
-
-        guard let url = URL(string: urlString) else { return ([], nil) }
+    static func fetchLyrics(title: String, artist: String, duration: Double? = nil) async -> LyricsResult {
+        var components = URLComponents(string: "https://lrclib.net/api/search")!
+        components.queryItems = [
+            URLQueryItem(name: "track_name", value: title),
+            URLQueryItem(name: "artist_name", value: artist)
+        ]
+        guard let url = components.url else { return LyricsResult(lines: [], plain: nil, sourceDuration: nil) }
 
         var request = URLRequest(url: url)
-        request.setValue("NeonWave/1.0 (iOS)", forHTTPHeaderField: "User-Agent")
-        request.timeoutInterval = 8
+        request.setValue("NeonWave/1.1 (iOS; lyrics sync)", forHTTPHeaderField: "User-Agent")
+        request.timeoutInterval = 10
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard (response as? HTTPURLResponse)?.statusCode == 200,
-                  let decoded = try? JSONDecoder().decode(LRCLIBResponse.self, from: data) else {
-                return ([], nil)
+                  let candidates = try? JSONDecoder().decode([LRCLIBResponse].self, from: data),
+                  let chosen = bestCandidate(candidates, title: title, artist: artist, duration: duration) else {
+                return LyricsResult(lines: [], plain: nil, sourceDuration: nil)
             }
-
-            if let synced = decoded.syncedLyrics, !synced.isEmpty {
+            if let synced = chosen.syncedLyrics, !synced.isEmpty {
                 let parsed = parseLRC(synced)
                 if !parsed.isEmpty {
-                    return (parsed, decoded.plainLyrics)
+                    return LyricsResult(lines: parsed, plain: chosen.plainLyrics, sourceDuration: chosen.duration)
                 }
             }
-
-            if let plain = decoded.plainLyrics, !plain.isEmpty {
-                return ([], plain)
-            }
-        } catch { }
-
-        return ([], nil)
+            return LyricsResult(lines: [], plain: chosen.plainLyrics, sourceDuration: chosen.duration)
+        } catch {
+            return LyricsResult(lines: [], plain: nil, sourceDuration: nil)
+        }
     }
 
-    private static func parseLRC(_ lrc: String) -> [LyricLine] {
+    static func bestCandidate(_ candidates: [LRCLIBResponse], title: String, artist: String, duration: Double?) -> LRCLIBResponse? {
+        let wantedTitle = normalized(title)
+        let wantedArtist = normalized(artist)
+        return candidates
+            .filter { !($0.syncedLyrics ?? "").isEmpty || !($0.plainLyrics ?? "").isEmpty }
+            .max { score($0, title: wantedTitle, artist: wantedArtist, duration: duration) < score($1, title: wantedTitle, artist: wantedArtist, duration: duration) }
+    }
+
+    private static func score(_ candidate: LRCLIBResponse, title: String, artist: String, duration: Double?) -> Double {
+        let candidateTitle = normalized(candidate.trackName ?? "")
+        let candidateArtist = normalized(candidate.artistName ?? "")
+        var value = 0.0
+        if candidateTitle == title { value += 100 }
+        else if candidateTitle.contains(title) || title.contains(candidateTitle) { value += 55 }
+        let titleTokens = Set(title.split(separator: " ").map(String.init).filter { $0.count > 1 })
+        let candidateTokens = Set(candidateTitle.split(separator: " ").map(String.init))
+        if !titleTokens.isEmpty { value += 45 * Double(titleTokens.intersection(candidateTokens).count) / Double(titleTokens.count) }
+        if candidateArtist == artist { value += 65 }
+        else if candidateArtist.contains(artist) || artist.contains(candidateArtist) { value += 35 }
+        if let duration, duration > 0, let candidateDuration = candidate.duration, candidateDuration > 0 {
+            let delta = abs(duration - candidateDuration)
+            if delta <= 1.5 { value += 70 }
+            else if delta <= 4 { value += 52 }
+            else if delta <= 9 { value += 28 }
+            else if delta > 20 { value -= min(80, delta) }
+        }
+        if !((candidate.syncedLyrics ?? "").isEmpty) { value += 12 }
+        return value
+    }
+
+    static func parseLRC(_ lrc: String) -> [LyricLine] {
+        let timePattern = #"\[(\d{1,3}):(\d{2}(?:\.\d{1,3})?)\]"#
+        guard let regex = try? NSRegularExpression(pattern: timePattern) else { return [] }
+        let offsetPattern = #"\[offset:([+-]?\d+)\]"#
+        var offset = 0.0
+        if let offsetRegex = try? NSRegularExpression(pattern: offsetPattern, options: [.caseInsensitive]),
+           let match = offsetRegex.firstMatch(in: lrc, range: NSRange(lrc.startIndex..., in: lrc)),
+           let range = Range(match.range(at: 1), in: lrc), let milliseconds = Double(lrc[range]) {
+            offset = milliseconds / 1000
+        }
+
         var result: [LyricLine] = []
-        let lines = lrc.components(separatedBy: .newlines)
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard trimmed.hasPrefix("["), let closingBracket = trimmed.firstIndex(of: "]") else { continue }
-            let timeString = String(trimmed[trimmed.index(after: trimmed.startIndex)..<closingBracket])
-            let text = String(trimmed[trimmed.index(after: closingBracket)...]).trimmingCharacters(in: .whitespaces)
-            let parts = timeString.components(separatedBy: ":")
-            guard parts.count >= 2,
-                  let minutes = Double(parts[0]),
-                  let seconds = Double(parts[1]) else { continue }
-            let totalSeconds = (minutes * 60.0) + seconds
-            if !text.isEmpty {
-                result.append(LyricLine(time: totalSeconds, text: text))
+        for rawLine in lrc.components(separatedBy: .newlines) {
+            let matches = regex.matches(in: rawLine, range: NSRange(rawLine.startIndex..., in: rawLine))
+            guard !matches.isEmpty else { continue }
+            let lastRange = matches.map(\.range).max { ($0.location + $0.length) < ($1.location + $1.length) }
+            guard let lastRange, let textRange = Range(NSRange(location: lastRange.location + lastRange.length, length: max(0, rawLine.utf16.count - lastRange.location - lastRange.length)), in: rawLine) else { continue }
+            let text = String(rawLine[textRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { continue }
+            for match in matches {
+                guard let minuteRange = Range(match.range(at: 1), in: rawLine),
+                      let secondRange = Range(match.range(at: 2), in: rawLine),
+                      let minutes = Double(rawLine[minuteRange]),
+                      let seconds = Double(rawLine[secondRange]) else { continue }
+                result.append(LyricLine(time: max(0, minutes * 60 + seconds + offset), text: text))
             }
         }
         return result.sorted { $0.time < $1.time }
+    }
+
+    private static func normalized(_ value: String) -> String {
+        value.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .lowercased()
+            .replacingOccurrences(of: #"[^a-z0-9]+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
     }
 }

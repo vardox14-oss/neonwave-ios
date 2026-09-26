@@ -1,0 +1,136 @@
+import SwiftUI
+import AVFoundation
+
+enum SpotifyCanvasState: Equatable {
+    case loading
+    case ready(URL)
+    case unavailable(String)
+}
+
+enum SpotifyCanvasService {
+    private struct CanvasResponse: Decodable {
+        let canvasUrl: String?
+        let connected: Bool
+    }
+
+    static func load(for track: Track) async -> SpotifyCanvasState {
+        guard AppConfiguration.apiURL != nil else {
+            return .unavailable("Le service NeonWave doit être connecté pour charger les Canvas Spotify.")
+        }
+        guard let spotifyId = track.spotifyId, !spotifyId.isEmpty else {
+            return .unavailable("Ce morceau ne possède pas encore d’identifiant Spotify.")
+        }
+        do {
+            let response: CanvasResponse = try await APIClient().call("api/spotify/canvas/\(spotifyId)")
+            guard response.connected else {
+                return .unavailable("Connectez Spotify dans NeonWave sur votre PC pour activer les Canvas.")
+            }
+            guard let value = response.canvasUrl, let url = URL(string: value) else {
+                return .unavailable("Spotify ne propose pas de Canvas pour ce morceau.")
+            }
+            return .ready(url)
+        } catch {
+            return .unavailable("Le Canvas Spotify est momentanément inaccessible.")
+        }
+    }
+}
+
+final class LoopingCanvasUIView: UIView {
+    override class var layerClass: AnyClass { AVPlayerLayer.self }
+    var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+}
+
+struct LoopingCanvasVideo: UIViewRepresentable {
+    let url: URL
+    let isPlaying: Bool
+
+    final class Coordinator {
+        var player: AVQueuePlayer?
+        var looper: AVPlayerLooper?
+        var loadedURL: URL?
+
+        func load(_ url: URL, in view: LoopingCanvasUIView) {
+            guard loadedURL != url else { return }
+            player?.pause()
+            let queue = AVQueuePlayer()
+            queue.isMuted = true
+            queue.actionAtItemEnd = .advance
+            let item = AVPlayerItem(url: url)
+            looper = AVPlayerLooper(player: queue, templateItem: item)
+            player = queue
+            loadedURL = url
+            view.playerLayer.player = queue
+            view.playerLayer.videoGravity = .resizeAspectFill
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> LoopingCanvasUIView {
+        let view = LoopingCanvasUIView()
+        view.backgroundColor = .black
+        context.coordinator.load(url, in: view)
+        if isPlaying { context.coordinator.player?.play() }
+        return view
+    }
+
+    func updateUIView(_ uiView: LoopingCanvasUIView, context: Context) {
+        context.coordinator.load(url, in: uiView)
+        if isPlaying { context.coordinator.player?.play() }
+        else { context.coordinator.player?.pause() }
+    }
+
+    static func dismantleUIView(_ uiView: LoopingCanvasUIView, coordinator: Coordinator) {
+        coordinator.player?.pause()
+        uiView.playerLayer.player = nil
+    }
+}
+
+struct SpotifyCanvasView: View {
+    let track: Track
+    let isPlaying: Bool
+    @State private var state: SpotifyCanvasState = .loading
+
+    var body: some View {
+        ZStack {
+            switch state {
+            case .loading:
+                RoundedRectangle(cornerRadius: 28).fill(Color.white.opacity(0.04))
+                VStack(spacing: 14) {
+                    ProgressView().tint(.white)
+                    Text("CHARGEMENT DU CANVAS SPOTIFY").font(.system(size: 9, weight: .bold)).tracking(1.5).foregroundStyle(NW.muted)
+                }
+            case .ready(let url):
+                LoopingCanvasVideo(url: url, isPlaying: isPlaying)
+                    .overlay(alignment: .bottomLeading) {
+                        Label("CANVAS SPOTIFY", systemImage: "sparkles.tv.fill")
+                            .font(.system(size: 9, weight: .bold)).tracking(1.3)
+                            .padding(.horizontal, 12).padding(.vertical, 8)
+                            .background(.ultraThinMaterial, in: Capsule()).padding(14)
+                    }
+            case .unavailable(let message):
+                ZStack {
+                    AsyncImage(url: track.artworkURL.flatMap(URL.init(string:))) { image in
+                        image.resizable().scaledToFill()
+                    } placeholder: {
+                        LinearGradient(colors: [NW.colors[track.colorIndex][0], NW.background], startPoint: .topLeading, endPoint: .bottomTrailing)
+                    }
+                    Rectangle().fill(.black.opacity(0.52))
+                    VStack(spacing: 12) {
+                        Image(systemName: "sparkles.tv").font(.system(size: 34, weight: .light))
+                        Text("Canvas indisponible").font(.headline)
+                        Text(message).font(.caption).foregroundStyle(.white.opacity(0.7)).multilineTextAlignment(.center).padding(.horizontal, 30)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 360)
+        .clipShape(RoundedRectangle(cornerRadius: 28))
+        .overlay(RoundedRectangle(cornerRadius: 28).stroke(.white.opacity(0.08)))
+        .task(id: track.id) {
+            state = .loading
+            state = await SpotifyCanvasService.load(for: track)
+        }
+    }
+}
