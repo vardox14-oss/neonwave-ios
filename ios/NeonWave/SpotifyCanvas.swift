@@ -116,6 +116,8 @@ struct SpotifyCanvasView: View {
                     } placeholder: {
                         LinearGradient(colors: [NW.colors[track.colorIndex][0], NW.background], startPoint: .topLeading, endPoint: .bottomTrailing)
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
                     Rectangle().fill(.black.opacity(0.52))
                     VStack(spacing: 12) {
                         Image(systemName: "sparkles.tv.fill").font(.system(size: 38, weight: .light)).foregroundStyle(NW.blue)

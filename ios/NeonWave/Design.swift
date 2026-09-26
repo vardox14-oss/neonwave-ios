@@ -40,11 +40,15 @@ struct CoverArt: View {
             ZStack {
                 if let imageURL, let image = UIImage(contentsOfFile: imageURL.path) {
                     Image(uiImage: image).resizable().scaledToFill()
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .clipped()
                 } else if let remote = (remoteURL ?? track?.artworkURL), let url = URL(string: remote) {
                     AsyncImage(url: url) { phase in
                         switch phase {
                         case .success(let image):
                             image.resizable().scaledToFill()
+                                .frame(width: geo.size.width, height: geo.size.height)
+                                .clipped()
                         default:
                             placeholder(geo: geo)
                         }
