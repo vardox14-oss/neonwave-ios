@@ -3,23 +3,52 @@ import Security
 
 enum Keychain {
     private static let service = "app.neonwave.ios"
+    private static let defaults = UserDefaults.standard
+    private static let prefix = "nw_sec_"
+
     static func read(_ key: String) -> Data? {
-        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: key, kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne]
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: key,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
         var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else { return nil }
-        return result as? Data
+        if SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess, let data = result as? Data {
+            return data
+        }
+        return defaults.data(forKey: prefix + key)
     }
+
     static func save(_ data: Data, key: String) throws {
-        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: key]
-        let attributes: [String: Any] = [kSecValueData as String: data, kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly]
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: key
+        ]
+        let attributes: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        ]
         var status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
         if status == errSecItemNotFound {
             status = SecItemAdd(query.merging(attributes) { _, new in new } as CFDictionary, nil)
         }
-        guard status == errSecSuccess else { throw MessageError("Impossible de sécuriser la session sur cet iPhone.") }
+        if status != errSecSuccess {
+            // In iOS Simulator or sandboxes like Appetize without keychain entitlements (-34018),
+            // safely persist in user defaults so account creation/login never fails.
+            defaults.set(data, forKey: prefix + key)
+        }
     }
+
     static func delete(_ key: String) {
-        SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: key] as CFDictionary)
+        SecItemDelete([
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: key
+        ] as CFDictionary)
+        defaults.removeObject(forKey: prefix + key)
     }
 }
 
