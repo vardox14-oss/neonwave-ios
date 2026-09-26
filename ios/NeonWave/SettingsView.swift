@@ -32,7 +32,7 @@ struct SettingsView: View {
                 }.listRowBackground(NW.surface)
                 Section("À propos") {
                     Button { showPrivacy = true } label: { Label("Confidentialité", systemImage: "hand.raised") }
-                    if let url = Configuration.publicURL("NeonWaveSupportURL") { Link(destination: url) { Label("Besoin d’aide ?", systemImage: "questionmark.circle") } }
+                    if let url = AppConfiguration.publicURL("NeonWaveSupportURL") { Link(destination: url) { Label("Besoin d’aide ?", systemImage: "questionmark.circle") } }
                     HStack { Text("NeonWave pour iPhone"); Spacer(); Text("1.0.0").foregroundStyle(NW.muted) }
                 }.listRowBackground(NW.surface)
                 Section {

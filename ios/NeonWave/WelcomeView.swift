@@ -128,8 +128,8 @@ struct PrivacyView: View {
                     Label("Vous gardez le contrôle", systemImage: "lock.shield.fill").font(.headline)
                     Text("Avec un compte, votre nom, votre e-mail et vos informations de connexion sont traités par le service NeonWave. Apple et Google interviennent uniquement si vous choisissez leur connexion. Vos téléchargements personnels nécessitent une connexion au serveur.")
                     Text("Vous pouvez supprimer vos fichiers dans la bibliothèque et votre compte dans les réglages. Les fichiers importés localement peuvent être inclus dans la sauvegarde de votre iPhone ; les téléchargements récupérables du serveur en sont exclus.")
-                    if let url = Configuration.publicURL("NeonWavePrivacyURL") { Link("Consulter la politique de confidentialité complète", destination: url) }
-                    if let url = Configuration.publicURL("NeonWaveSupportURL") { Link("Contacter l’assistance", destination: url) }
+                    if let url = AppConfiguration.publicURL("NeonWavePrivacyURL") { Link("Consulter la politique de confidentialité complète", destination: url) }
+                    if let url = AppConfiguration.publicURL("NeonWaveSupportURL") { Link("Contacter l’assistance", destination: url) }
                 }.font(.subheadline).foregroundStyle(NW.muted).lineSpacing(5).padding(26)
             }.background(NW.background).navigationTitle("Confidentialité").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fermer") { dismiss() } } }

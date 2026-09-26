@@ -21,7 +21,7 @@ import Security
         isGuest = account == nil && UserDefaults.standard.bool(forKey: "localMode")
     }
     func loadProviders() async {
-        guard Configuration.apiURL != nil else { return }
+        guard AppConfiguration.apiURL != nil else { return }
         do { providers = try await api.call("api/ios/auth/providers", authenticated: false) }
         catch { self.error = "Connexion au service indisponible. Vous pouvez utiliser votre bibliothèque locale." }
     }
@@ -43,7 +43,7 @@ import Security
         } catch { self.error = error.localizedDescription }
     }
     func signInGoogle() {
-        guard !busy, providers.google, let base = Configuration.apiURL else { return }
+        guard !busy, providers.google, let base = AppConfiguration.apiURL else { return }
         busy = true; error = nil
         let verifier = randomToken()
         let state = randomToken()

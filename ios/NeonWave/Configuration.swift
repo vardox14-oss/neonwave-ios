@@ -1,6 +1,6 @@
 import Foundation
 
-enum Configuration {
+enum AppConfiguration {
     static var apiURL: URL? {
         guard let value = Bundle.main.object(forInfoDictionaryKey: "NeonWaveAPIURL") as? String,
               let url = URL(string: value), url.scheme == "https", let host = url.host,

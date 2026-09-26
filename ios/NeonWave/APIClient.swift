@@ -26,7 +26,7 @@ enum Keychain {
 struct APIClient {
     var token: String? { Keychain.read("token").flatMap { String(data: $0, encoding: .utf8) } }
     func request(_ path: String, method: String = "GET", body: [String: Any]? = nil, authenticated: Bool = true) throws -> URLRequest {
-        guard let base = Configuration.apiURL else { throw MessageError("La connexion aux comptes sera disponible après configuration du service NeonWave. Votre bibliothèque locale reste accessible.") }
+        guard let base = AppConfiguration.apiURL else { throw MessageError("La connexion aux comptes sera disponible après configuration du service NeonWave. Votre bibliothèque locale reste accessible.") }
         var request = URLRequest(url: base.appendingPathComponent(path))
         request.httpMethod = method; request.timeoutInterval = 30; request.httpShouldHandleCookies = false
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
