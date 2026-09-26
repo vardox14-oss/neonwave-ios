@@ -30,9 +30,6 @@ enum SpotifyCanvasService {
         }
         do {
             let response: CanvasResponse = try await APIClient().call("api/spotify/canvas/\(targetId)\(query)")
-            if let resolved = response.spotifyId, track.spotifyId == nil || track.spotifyId?.isEmpty == true {
-                track.spotifyId = resolved
-            }
             guard response.connected else {
                 return .unavailable("Connectez Spotify dans NeonWave sur votre PC pour activer les Canvas.")
             }
