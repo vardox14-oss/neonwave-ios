@@ -1,10 +1,13 @@
 import SwiftUI
 
 enum NW {
-    static let background = Color(red: 0.035, green: 0.043, blue: 0.07)
-    static let surface = Color(red: 0.075, green: 0.086, blue: 0.12)
-    static let blue = Color(red: 0.35, green: 0.48, blue: 1)
-    static let muted = Color(red: 0.57, green: 0.60, blue: 0.68)
+    static let background = Color(red: 0.018, green: 0.022, blue: 0.048)
+    static let surface = Color(red: 0.060, green: 0.068, blue: 0.105)
+    static let elevated = Color(red: 0.085, green: 0.095, blue: 0.145)
+    static let blue = Color(red: 0.38, green: 0.50, blue: 1)
+    static let cyan = Color(red: 0.20, green: 0.83, blue: 0.91)
+    static let violet = Color(red: 0.58, green: 0.35, blue: 1)
+    static let muted = Color(red: 0.61, green: 0.64, blue: 0.73)
     static let colors: [[Color]] = [
         [.init(red: 0.27, green: 0.40, blue: 1), .init(red: 0.08, green: 0.10, blue: 0.34)],
         [.init(red: 0.94, green: 0.42, blue: 0.30), .init(red: 0.31, green: 0.08, blue: 0.19)],
@@ -13,6 +16,26 @@ enum NW {
         [.init(red: 0.96, green: 0.70, blue: 0.32), .init(red: 0.36, green: 0.16, blue: 0.12)],
         [.init(red: 0.85, green: 0.36, blue: 0.61), .init(red: 0.26, green: 0.09, blue: 0.29)]
     ]
+}
+
+struct PremiumBackdrop: View {
+    var accent: Color = NW.blue
+    var body: some View {
+        ZStack {
+            NW.background
+            RadialGradient(colors: [accent.opacity(0.24), .clear], center: .init(x: 0.88, y: 0.05), startRadius: 0, endRadius: 360)
+            RadialGradient(colors: [NW.cyan.opacity(0.12), .clear], center: .init(x: 0.05, y: 0.82), startRadius: 10, endRadius: 330)
+            LinearGradient(colors: [.clear, Color.black.opacity(0.22)], startPoint: .top, endPoint: .bottom)
+        }.ignoresSafeArea()
+    }
+}
+
+extension View {
+    func premiumPanel(radius: CGFloat = 24) -> some View {
+        self
+            .background(.white.opacity(0.065), in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).stroke(.white.opacity(0.09), lineWidth: 1))
+    }
 }
 
 struct WaveMark: View {
@@ -87,8 +110,10 @@ struct PrimaryButton: View {
                 if loading { ProgressView().tint(.white) }
                 else if let symbol { Image(systemName: symbol) }
                 Text(title).font(.system(.body, design: .rounded, weight: .bold))
-            }.frame(maxWidth: .infinity).padding(.vertical, 18)
-                .background(NW.blue.gradient, in: RoundedRectangle(cornerRadius: 18))
+            }.frame(maxWidth: .infinity).frame(minHeight: 56)
+                .background(LinearGradient(colors: [NW.blue, NW.violet], startPoint: .leading, endPoint: .trailing), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(.white.opacity(0.18)))
+                .shadow(color: NW.blue.opacity(0.24), radius: 18, y: 9)
         }.foregroundStyle(.white).buttonStyle(PressStyle()).disabled(loading)
     }
 }
@@ -108,7 +133,7 @@ struct SectionHeading: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             if let eyebrow { Text(eyebrow.uppercased()).font(.system(size: 10, weight: .bold)).tracking(2.5).foregroundStyle(NW.muted) }
-            Text(title).font(.system(.title2, design: .rounded, weight: .bold)).foregroundStyle(.white)
+            Text(title).font(.system(size: 25, weight: .bold, design: .rounded)).tracking(-0.7).foregroundStyle(.white)
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
 }

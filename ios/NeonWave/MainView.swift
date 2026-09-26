@@ -13,8 +13,10 @@ struct MainView: View {
     @State private var showSettings = false
     var body: some View {
         ZStack {
+            PremiumBackdrop()
             YouTubePlayerWebView()
-                .frame(width: 320, height: 240)
+                .frame(width: 1, height: 1)
+                .opacity(0.001)
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
 
@@ -27,21 +29,26 @@ struct MainView: View {
                     case .downloads: DownloadsView(importFiles: { showImport = true })
                     }
                 }
-                .background(NW.background).toolbarBackground(NW.background, for: .navigationBar)
+                .background(Color.clear).toolbarBackground(.hidden, for: .navigationBar)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
-                        HStack(spacing: 8) { WaveMark(size: 23); Text("neonwave").font(.system(.headline, design: .rounded)).tracking(-0.5) }.foregroundStyle(.white)
+                        HStack(spacing: 8) {
+                            WaveMark(size: 25)
+                            Text("neonwave").font(.system(size: 18, weight: .bold, design: .rounded)).tracking(-0.7)
+                        }.foregroundStyle(.white)
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { showSettings = true } label: {
-                            Text(String((session.account?.username ?? "N").prefix(1)).uppercased()).font(.caption.bold())
-                                .frame(width: 34, height: 34).background(NW.blue.opacity(0.2), in: Circle()).overlay(Circle().stroke(NW.blue.opacity(0.35)))
+                            ZStack {
+                                Circle().fill(LinearGradient(colors: [NW.blue, NW.violet], startPoint: .topLeading, endPoint: .bottomTrailing))
+                                Text(String((session.account?.username ?? "N").prefix(1)).uppercased()).font(.caption.bold())
+                            }.frame(width: 35, height: 35).overlay(Circle().stroke(.white.opacity(0.22)))
                         }.accessibilityLabel("Mon profil et réglages")
                     }
                 }
                 .safeAreaInset(edge: .bottom, spacing: 0) {
-                    VStack(spacing: 0) {
-                        if player.current != nil { MiniPlayer { showPlayer = true }.padding(.horizontal, 12).padding(.bottom, 10) }
+                    VStack(spacing: 8) {
+                        if player.current != nil { MiniPlayer { showPlayer = true }.padding(.horizontal, 12) }
                         HStack(spacing: 0) {
                             ForEach(LibraryTab.allCases, id: \.self) { item in
                                 Button {
@@ -50,11 +57,14 @@ struct MainView: View {
                                     VStack(spacing: 6) {
                                         Image(systemName: item.symbol).font(.system(size: 20, weight: .medium))
                                         Text(item.rawValue).font(.system(size: 9, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.8)
-                                    }.foregroundStyle(tab == item ? NW.blue : NW.muted).frame(maxWidth: .infinity).frame(minHeight: 55)
+                                    }.foregroundStyle(tab == item ? .white : NW.muted).frame(maxWidth: .infinity).frame(minHeight: 54)
+                                        .background(tab == item ? NW.blue.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 16))
                                 }.accessibilityAddTraits(tab == item ? .isSelected : [])
                             }
-                        }.padding(.horizontal, 8).padding(.top, 4)
-                    }.background(.ultraThinMaterial)
+                        }.padding(5).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.09)))
+                            .padding(.horizontal, 12)
+                    }.padding(.bottom, 7)
                 }
             }
             .fileImporter(isPresented: $showImport, allowedContentTypes: [.audio], allowsMultipleSelection: true) { result in
@@ -80,19 +90,20 @@ struct HomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 30) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("\(greeting)\(session.account.map { ", \($0.username)" } ?? "").").font(.subheadline).foregroundStyle(NW.muted)
-                    Text("Dans votre\nélément.").font(.system(size: 40, weight: .bold, design: .rounded)).tracking(-1.4)
+                    Text("\(greeting)\(session.account.map { ", \($0.username)" } ?? "")").font(.subheadline.weight(.medium)).foregroundStyle(NW.muted)
+                    Text("Votre musique.\nVotre moment.").font(.system(size: 40, weight: .bold, design: .rounded)).tracking(-1.5)
                 }.padding(.top, 12)
                 ZStack(alignment: .leading) {
-                    LinearGradient(colors: [Color(red: 0.21, green: 0.28, blue: 0.70), Color(red: 0.08, green: 0.11, blue: 0.27)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                    LinearGradient(colors: [NW.blue.opacity(0.92), NW.violet.opacity(0.78), Color(red: 0.04, green: 0.07, blue: 0.18)], startPoint: .topLeading, endPoint: .bottomTrailing)
                     GeometryReader { geo in
-                        Circle().stroke(.white.opacity(0.10), lineWidth: 36).frame(width: 220).offset(x: geo.size.width - 160, y: 15)
-                        Circle().stroke(.white.opacity(0.18), lineWidth: 1).frame(width: 165).offset(x: geo.size.width - 132, y: 42)
+                        Circle().stroke(.white.opacity(0.09), lineWidth: 38).frame(width: 230).offset(x: geo.size.width - 158, y: 9)
+                        Circle().stroke(.white.opacity(0.20), lineWidth: 1).frame(width: 166).offset(x: geo.size.width - 128, y: 41)
+                        WaveMark(size: 78).opacity(0.32).rotationEffect(.degrees(-10)).offset(x: geo.size.width - 116, y: 82)
                     }.clipped().accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 17) {
-                        Label("JUSTE VOUS ET LE SON", systemImage: "sparkle").font(.system(size: 9, weight: .bold)).tracking(1.7)
-                        Text("Votre bulle\nsonore.").font(.system(size: 31, weight: .bold, design: .rounded)).tracking(-0.8)
-                        Text(library.downloaded.isEmpty ? "Une bibliothèque qui vous ressemble." : "Vos titres, dans un nouvel ordre.").font(.caption).foregroundStyle(.white.opacity(0.65))
+                        Label("MIX PERSONNALISÉ", systemImage: "sparkles").font(.system(size: 9, weight: .bold)).tracking(1.7)
+                        Text("Entrez dans\nvotre bulle.").font(.system(size: 31, weight: .bold, design: .rounded)).tracking(-0.9)
+                        Text(library.downloaded.isEmpty ? "Commencez votre collection NeonWave." : "Votre sélection évolue avec vos écoutes.").font(.caption).foregroundStyle(.white.opacity(0.72))
                         Button {
                             if let first = library.downloaded.randomElement() { player.shuffle = true; player.play(first, in: library.downloaded) }
                             else { importFiles() }
@@ -101,7 +112,9 @@ struct HomeView: View {
                                 .font(.caption.bold()).padding(.horizontal, 18).padding(.vertical, 13).background(.white, in: Capsule()).foregroundStyle(Color.black)
                         }.buttonStyle(PressStyle())
                     }.padding(24)
-                }.clipShape(RoundedRectangle(cornerRadius: 28))
+                }.clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 30).stroke(.white.opacity(0.13)))
+                    .shadow(color: NW.blue.opacity(0.18), radius: 26, y: 14)
                 HStack(spacing: 12) {
                     NavigationLink { TrackCollectionView(title: "Titres aimés", kind: .liked) } label: { shortcut("Vos favoris", subtitle: "\(library.liked.count) titres", symbol: "heart.fill", color: .purple) }
                     NavigationLink { TrackCollectionView(title: "Sur cet iPhone", kind: .downloaded) } label: { shortcut("Hors connexion", subtitle: "\(library.downloaded.count) titres", symbol: "arrow.down", color: NW.blue) }
@@ -180,6 +193,6 @@ struct HomeView: View {
         VStack(alignment: .leading, spacing: 12) {
             Image(systemName: symbol).font(.title3).foregroundStyle(color)
             VStack(alignment: .leading, spacing: 4) { Text(title).font(.caption.bold()).foregroundStyle(.white); Text(subtitle).font(.caption2).foregroundStyle(NW.muted) }
-        }.frame(maxWidth: .infinity, alignment: .leading).padding(18).background(NW.surface, in: RoundedRectangle(cornerRadius: 20))
+        }.frame(maxWidth: .infinity, alignment: .leading).padding(18).premiumPanel(radius: 21)
     }
 }

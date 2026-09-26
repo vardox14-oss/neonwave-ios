@@ -7,64 +7,104 @@ struct WelcomeView: View {
     @State private var showEmail = false
     @State private var showPrivacy = false
     @State private var floating = false
+    @State private var pulse = false
+
     var body: some View {
         ZStack {
-            NW.background.ignoresSafeArea()
-            RadialGradient(colors: [NW.blue.opacity(0.26), .clear], center: .init(x: 0.8, y: 0.15), startRadius: 10, endRadius: 380).ignoresSafeArea()
+            PremiumBackdrop(accent: NW.violet)
             ScrollView {
-                VStack(alignment: .leading, spacing: 26) {
-                    HStack(spacing: 10) {
-                        WaveMark(size: 26)
-                        Text("neonwave").font(.system(.title3, design: .rounded, weight: .bold)).tracking(-0.7)
+                VStack(alignment: .leading, spacing: 24) {
+                    HStack(spacing: 11) {
+                        WaveMark(size: 31)
+                        Text("neonwave").font(.system(size: 21, weight: .bold, design: .rounded)).tracking(-0.8)
                         Spacer()
-                        Text("FAITES PLACE AU SON").font(.system(size: 8, weight: .bold)).tracking(1.6).foregroundStyle(NW.muted)
-                    }.padding(.top, 18)
+                        HStack(spacing: 6) {
+                            Circle().fill(Color.green).frame(width: 6, height: 6).shadow(color: .green, radius: pulse ? 7 : 2)
+                            Text("POUR IPHONE").font(.system(size: 8, weight: .bold)).tracking(1.5)
+                        }.foregroundStyle(.white.opacity(0.72)).padding(.horizontal, 11).padding(.vertical, 8).premiumPanel(radius: 20)
+                    }.padding(.top, 10)
+
                     ZStack {
-                        Circle().stroke(NW.blue.opacity(0.18), lineWidth: 1).frame(width: 265, height: 265)
-                        Circle().stroke(.white.opacity(0.08), lineWidth: 1).frame(width: 315, height: 315)
-                        CoverArt(index: 2).frame(width: 178).rotationEffect(.degrees(-19)).offset(x: -48, y: floating ? -5 : 5)
-                        CoverArt(index: 0).frame(width: 196).rotationEffect(.degrees(12)).shadow(color: .black.opacity(0.4), radius: 30, x: 0, y: 20).offset(x: 46, y: floating ? 25 : 15)
-                        HStack(spacing: 8) {
-                            Circle().fill(Color.green).frame(width: 6, height: 6)
-                            Text("VOTRE MONDE. VOTRE BANDE-SON.").font(.system(size: 8, weight: .bold)).tracking(1)
-                        }.padding(12).background(.ultraThinMaterial, in: Capsule()).offset(y: 132)
-                    }.frame(maxWidth: .infinity).frame(height: 310).accessibilityHidden(true)
+                        Circle().fill(NW.blue.opacity(0.16)).frame(width: 250).blur(radius: 35)
+                        Circle().stroke(NW.blue.opacity(0.22), lineWidth: 1).frame(width: 276)
+                        Circle().stroke(.white.opacity(0.08), lineWidth: 1).frame(width: 326)
+                        CoverArt(index: 2).frame(width: 164).rotationEffect(.degrees(-16)).offset(x: -63, y: floating ? -13 : 1)
+                        CoverArt(index: 0).frame(width: 196).rotationEffect(.degrees(10)).shadow(color: .black.opacity(0.52), radius: 34, y: 22).offset(x: 47, y: floating ? 15 : 29)
+                        VStack(spacing: 3) {
+                            Image(systemName: "waveform").foregroundStyle(NW.cyan)
+                            Text("AUDIO NATIF").font(.system(size: 7, weight: .bold)).tracking(1.2)
+                        }.padding(.horizontal, 13).padding(.vertical, 10).background(.ultraThinMaterial, in: Capsule()).offset(x: -92, y: 113)
+                        HStack(spacing: 7) {
+                            Image(systemName: "arrow.down.circle.fill")
+                            Text("HORS LIGNE").font(.system(size: 7, weight: .bold)).tracking(1.1)
+                        }.padding(.horizontal, 13).padding(.vertical, 10).background(.ultraThinMaterial, in: Capsule()).offset(x: 89, y: -104)
+                    }.frame(maxWidth: .infinity).frame(height: 294).accessibilityHidden(true)
+
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("La musique,\nà votre rythme.").font(.system(size: 42, weight: .bold, design: .rounded)).tracking(-1.8).fixedSize(horizontal: false, vertical: true)
-                        Text("Vos titres. Vos playlists. Votre bulle.\nEmportez ce qui vous fait vibrer.").font(.subheadline).foregroundStyle(NW.muted).lineSpacing(5)
+                        Text("Toute votre musique.\nMême sans réseau.").font(.system(size: 43, weight: .bold, design: .rounded)).tracking(-1.9).fixedSize(horizontal: false, vertical: true)
+                        Text("Un lecteur pensé pour l’iPhone, avec vos playlists, vos paroles synchronisées et vos artistes préférés.").font(.subheadline).foregroundStyle(NW.muted).lineSpacing(5)
                     }
-                    VStack(spacing: 12) {
+
+                    HStack(spacing: 9) {
+                        promise("Paroles", symbol: "quote.bubble.fill")
+                        promise("Canvas", symbol: "sparkles.tv.fill")
+                        promise("Hors ligne", symbol: "airplane")
+                    }
+
+                    VStack(spacing: 11) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("ENTREZ DANS VOTRE BULLE").font(.system(size: 9, weight: .bold)).tracking(1.8).foregroundStyle(NW.blue)
+                                Text("Votre espace vous attend.").font(.headline)
+                            }
+                            Spacer(); WaveMark(size: 30)
+                        }.padding(.bottom, 4)
                         SignInWithAppleButton(.continue, onRequest: session.configureApple) { result in Task { await session.completeApple(result) } }
-                            .signInWithAppleButtonStyle(.white).frame(height: 54).clipShape(RoundedRectangle(cornerRadius: 16))
+                            .signInWithAppleButtonStyle(.white).frame(height: 55).clipShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
                             .disabled(!session.appleReady || session.busy).opacity(session.appleReady ? 1 : 0.4)
-                            .accessibilityHint(session.appleReady ? "" : "Connexion Apple actuellement indisponible")
                         Button(action: session.signInGoogle) {
-                            HStack(spacing: 12) { Text("G").font(.title3.bold()); Text("Continuer avec Google").font(.body.weight(.semibold)) }
-                                .frame(maxWidth: .infinity).frame(minHeight: 54).background(.white.opacity(0.065), in: RoundedRectangle(cornerRadius: 16))
-                                .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.12)))
-                        }.foregroundStyle(.white).disabled(!session.providers.google || session.busy).opacity(session.providers.google ? 1 : 0.4)
-                            .accessibilityHint(session.providers.google ? "" : "Connexion Google actuellement indisponible")
+                            HStack(spacing: 12) {
+                                Text("G").font(.title3.bold()).foregroundStyle(.blue)
+                                Text("Continuer avec Google").font(.body.weight(.semibold))
+                            }.frame(maxWidth: .infinity).frame(minHeight: 55).background(.white, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+                        }.foregroundStyle(.black).disabled(!session.providers.google || session.busy).opacity(session.providers.google ? 1 : 0.4)
                         Button { showEmail = true } label: {
-                            Label("Continuer avec mon e-mail", systemImage: "envelope").font(.subheadline.weight(.medium)).frame(maxWidth: .infinity).padding(.vertical, 12)
-                        }.foregroundStyle(NW.muted)
-                        if session.busy { ProgressView().tint(NW.blue) }
-                        if let error = session.error { Text(error).font(.footnote).foregroundStyle(.orange).multilineTextAlignment(.center).accessibilityAddTraits(.updatesFrequently) }
-                        Rectangle().fill(.white.opacity(0.08)).frame(height: 1).padding(.vertical, 2)
-                        Button { session.enterGuest() } label: {
-                            HStack { Text("Commencer sur cet iPhone"); Image(systemName: "arrow.right") }.font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity).padding(.vertical, 10)
+                            Label("Continuer avec mon e-mail", systemImage: "envelope.fill").font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity).frame(minHeight: 51)
+                                .background(.white.opacity(0.075), in: RoundedRectangle(cornerRadius: 16))
                         }.foregroundStyle(.white)
-                        Text("Sans compte, avec vos fichiers personnels.").font(.caption).foregroundStyle(NW.muted)
-                            .frame(maxWidth: .infinity)
-                    }
-                    Button("Votre musique reste personnelle. Notre confidentialité.") { showPrivacy = true }
-                        .font(.system(size: 11)).foregroundStyle(NW.muted).frame(maxWidth: .infinity).padding(.bottom, 20)
-                }.padding(.horizontal, 28).frame(maxWidth: 500).frame(maxWidth: .infinity)
+                        if session.busy { ProgressView().tint(NW.blue) }
+                        if let error = session.error { Text(error).font(.footnote).foregroundStyle(.orange).multilineTextAlignment(.center) }
+                        HStack {
+                            Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
+                            Text("OU").font(.system(size: 8, weight: .bold)).tracking(1.5).foregroundStyle(NW.muted)
+                            Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
+                        }.padding(.vertical, 2)
+                        Button { session.enterGuest() } label: {
+                            HStack { Text("Essayer sur cet iPhone"); Spacer(); Image(systemName: "arrow.right") }.font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity).padding(.vertical, 9)
+                        }.foregroundStyle(.white)
+                        Text("Le mode local ne demande aucun compte.").font(.caption2).foregroundStyle(NW.muted).frame(maxWidth: .infinity)
+                    }.padding(18).premiumPanel(radius: 26)
+
+                    Button("Confidentialité et traitement des données") { showPrivacy = true }
+                        .font(.system(size: 11, weight: .medium)).foregroundStyle(NW.muted).frame(maxWidth: .infinity).padding(.bottom, 16)
+                }.padding(.horizontal, 22).frame(maxWidth: 520).frame(maxWidth: .infinity)
             }.scrollIndicators(.hidden)
         }
         .task { await session.loadProviders(); await session.prepareApple() }
-        .onAppear { if !reduceMotion { withAnimation(.easeInOut(duration: 5).repeatForever(autoreverses: true)) { floating = true } } }
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 5).repeatForever(autoreverses: true)) { floating = true }
+            withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) { pulse = true }
+        }
         .sheet(isPresented: $showEmail) { EmailAuthView() }
         .sheet(isPresented: $showPrivacy) { PrivacyView() }
+    }
+
+    private func promise(_ title: String, symbol: String) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: symbol).font(.system(size: 16, weight: .semibold)).foregroundStyle(NW.cyan)
+            Text(title).font(.system(size: 10, weight: .semibold)).lineLimit(1)
+        }.frame(maxWidth: .infinity).padding(.vertical, 13).premiumPanel(radius: 17)
     }
 }
 
@@ -104,14 +144,14 @@ struct EmailAuthView: View {
                     }.disabled(!valid).opacity(valid ? 1 : 0.5)
                     Text("Vos fichiers importés restent dans la bibliothèque de ce compte sur cet iPhone.").font(.caption).foregroundStyle(NW.muted)
                 }.padding(26)
-            }.background(NW.background).navigationTitle(registering ? "Créer un compte" : "Connexion").navigationBarTitleDisplayMode(.inline)
+            }.background(PremiumBackdrop(accent: NW.violet)).navigationTitle(registering ? "Créer un compte" : "Connexion").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fermer") { dismiss() } } }
         }.presentationDragIndicator(.visible)
     }
     private func field<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title).font(.caption.weight(.semibold)).foregroundStyle(NW.muted)
-            content().padding(16).background(NW.surface, in: RoundedRectangle(cornerRadius: 14))
+            content().padding(16).premiumPanel(radius: 16)
         }
     }
 }
@@ -131,7 +171,7 @@ struct PrivacyView: View {
                     if let url = AppConfiguration.publicURL("NeonWavePrivacyURL") { Link("Consulter la politique de confidentialité complète", destination: url) }
                     if let url = AppConfiguration.publicURL("NeonWaveSupportURL") { Link("Contacter l’assistance", destination: url) }
                 }.font(.subheadline).foregroundStyle(NW.muted).lineSpacing(5).padding(26)
-            }.background(NW.background).navigationTitle("Confidentialité").navigationBarTitleDisplayMode(.inline)
+            }.background(PremiumBackdrop()).navigationTitle("Confidentialité").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fermer") { dismiss() } } }
         }
     }

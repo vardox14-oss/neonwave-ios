@@ -45,7 +45,7 @@ struct SettingsView: View {
                     }
                 } footer: { Text("Les playlists et les favoris de cette version sont enregistrés sur cet iPhone. Les fichiers du compte peuvent être récupérés depuis le serveur via Actualiser.") }.listRowBackground(NW.surface)
                 if let error { Section { Text(error).foregroundStyle(.orange) }.listRowBackground(NW.surface) }
-            }.scrollContentBackground(.hidden).background(NW.background).navigationTitle("Votre espace").navigationBarTitleDisplayMode(.inline)
+            }.scrollContentBackground(.hidden).background(PremiumBackdrop(accent: NW.violet)).navigationTitle("Votre espace").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Terminé") { dismiss() } } }
         }
         .sheet(isPresented: $showPrivacy) { PrivacyView() }

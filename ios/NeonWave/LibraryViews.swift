@@ -52,7 +52,9 @@ struct TrackRow: View {
                 }
                 Button("Supprimer de cet iPhone", systemImage: "trash", role: .destructive) { confirmDelete = true }
             } label: { Image(systemName: "ellipsis").font(.body.bold()).foregroundStyle(NW.muted).frame(width: 36, height: 48) }.accessibilityLabel("Options de \(track.title)")
-        }.padding(.vertical, 7)
+        }.padding(.horizontal, 9).padding(.vertical, 7)
+            .background(player.current?.id == track.id ? NW.blue.opacity(0.11) : .white.opacity(0.025), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(player.current?.id == track.id ? NW.blue.opacity(0.22) : .white.opacity(0.035)))
             .confirmationDialog("Supprimer « \(track.title) » ?", isPresented: $confirmDelete, titleVisibility: .visible) {
                 Button("Supprimer le fichier et ses références", role: .destructive) {
                     downloads.cancel(track.id); if player.current?.id == track.id { player.stop() }; library.deleteTrack(track)
@@ -113,7 +115,7 @@ struct TrackCollectionView: View {
                 if tracks.isEmpty { EmptyLibrary(symbol: symbol, title: "Une place pour vos titres", description: "Ajoutez vos morceaux préférés pour commencer votre collection.") }
                 LazyVStack(spacing: 2) { ForEach(tracks) { TrackRow(track: $0, context: tracks, playlist: playlist) } }
             }.padding(22)
-        }.background(NW.background).navigationBarTitleDisplayMode(.inline)
+        }.background(PremiumBackdrop()).navigationBarTitleDisplayMode(.inline)
             .safeAreaInset(edge: .bottom) { if player.current != nil { MiniPlayer { showPlayer = true }.padding(12).background(.ultraThinMaterial) } }
             .fullScreenCover(isPresented: $showPlayer) { PlayerView() }
             .toolbar {
@@ -152,7 +154,7 @@ struct LibraryView: View {
                     IconButton(symbol: "plus", label: "Créer une playlist") { newPlaylist = true }.background(NW.surface, in: Circle())
                 }.padding(.top, 16)
                 HStack(spacing: 12) {
-                    Button(action: importFiles) { Label("Importer", systemImage: "square.and.arrow.down").font(.subheadline.bold()).padding(14).frame(maxWidth: .infinity).background(NW.blue.opacity(0.15), in: Capsule()) }
+                    Button(action: importFiles) { Label("Importer", systemImage: "square.and.arrow.down").font(.subheadline.bold()).padding(14).frame(maxWidth: .infinity).background(NW.blue.opacity(0.18), in: Capsule()).overlay(Capsule().stroke(NW.blue.opacity(0.25))) }
                     if session.account != nil {
                         Button { Task { await library.sync() } } label: {
                             HStack { if library.syncing { ProgressView() } else { Image(systemName: "arrow.triangle.2.circlepath") }; Text("Actualiser") }.font(.subheadline.bold()).padding(14).background(NW.surface, in: Capsule())
@@ -191,7 +193,7 @@ struct LibraryView: View {
             CoverArt(index: index, symbol: symbol, radius: 16).frame(width: 64)
             VStack(alignment: .leading, spacing: 5) { Text(title).font(.subheadline.bold()).foregroundStyle(.white); Text(subtitle).font(.caption).foregroundStyle(NW.muted) }
             Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(NW.muted)
-        }
+        }.padding(10).premiumPanel(radius: 20)
     }
 }
 
@@ -264,7 +266,7 @@ struct SearchView: View {
                         .accessibilityLabel("Effacer la recherche")
                     }
                 }
-                .padding(17).background(NW.surface, in: RoundedRectangle(cornerRadius: 17))
+                .padding(17).premiumPanel(radius: 18)
 
                 Picker("Filtrer les titres", selection: $filter) {
                     Text("En ligne").tag(0)
@@ -493,7 +495,7 @@ struct DownloadsView: View {
                         Text("\(library.downloaded.count) titres avec vous").font(.headline)
                         Text("\(ByteCountFormatter.string(fromByteCount: library.storageBytes, countStyle: .file)) sur cet iPhone").font(.caption).foregroundStyle(NW.muted)
                     }
-                }.padding(24).frame(maxWidth: .infinity, alignment: .leading).background(NW.surface, in: RoundedRectangle(cornerRadius: 24))
+                }.padding(24).frame(maxWidth: .infinity, alignment: .leading).premiumPanel(radius: 24)
                 Toggle(isOn: Binding(get: { library.snapshot.wifiOnly }, set: library.setWifiOnly)) {
                     VStack(alignment: .leading, spacing: 4) { Text("Télécharger en Wi-Fi uniquement").font(.subheadline.bold()); Text("Appliqué aux prochains téléchargements.").font(.caption).foregroundStyle(NW.muted) }
                 }.tint(NW.blue)

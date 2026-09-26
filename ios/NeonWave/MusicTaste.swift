@@ -146,7 +146,7 @@ struct TasteOnboardingView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(colors: [Color(red: 0.035, green: 0.02, blue: 0.12), NW.background, Color(red: 0.01, green: 0.12, blue: 0.13)], startPoint: .topLeading, endPoint: .bottomTrailing).ignoresSafeArea()
+            PremiumBackdrop(accent: NW.violet)
             Circle().fill(NW.blue.opacity(0.22)).frame(width: 330).blur(radius: 80).offset(x: 170, y: -310)
             VStack(spacing: 0) {
                 HStack {
