@@ -76,8 +76,7 @@ final class YouTubePlayer: NSObject, ObservableObject, WKScriptMessageHandler, W
                     'disablekb': 1,
                     'fs': 0,
                     'modestbranding': 1,
-                    'rel': 0,
-                    'origin': 'https://www.youtube.com'
+                    'rel': 0
                 },
                 events: {
                     'onReady': onPlayerReady,
@@ -114,7 +113,10 @@ final class YouTubePlayer: NSObject, ObservableObject, WKScriptMessageHandler, W
         }
         function playVideoId(id) {
             if (player && typeof player.loadVideoById === 'function') {
-                player.loadVideoById(id);
+                player.loadVideoById({
+                    videoId: id,
+                    startSeconds: 0
+                });
                 player.playVideo();
             }
         }
@@ -125,7 +127,7 @@ final class YouTubePlayer: NSObject, ObservableObject, WKScriptMessageHandler, W
         </body>
         </html>
         """
-        webView.loadHTMLString(html, baseURL: URL(string: "https://www.youtube.com"))
+        webView.loadHTMLString(html, baseURL: URL(string: "https://www.youtube-nocookie.com"))
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {

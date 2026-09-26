@@ -22,4 +22,9 @@
     <key>NeonWaveAPIURL</key><string>$(NEONWAVE_API_URL)</string>
     <key>NeonWavePrivacyURL</key><string>$(NEONWAVE_PRIVACY_URL)</string>
     <key>NeonWaveSupportURL</key><string>$(NEONWAVE_SUPPORT_URL)</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+    </dict>
 </dict></plist>

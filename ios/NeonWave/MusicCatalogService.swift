@@ -183,21 +183,32 @@ enum MusicCatalogService {
 
         var request = URLRequest(url: url)
         request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
+        request.setValue("SOCS=CAESEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg; CONSENT=YES+", forHTTPHeaderField: "Cookie")
+        request.setValue("fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7", forHTTPHeaderField: "Accept-Language")
         request.timeoutInterval = 8
 
         do {
             let (data, _) = try await URLSession.shared.data(for: request)
             guard let html = String(data: data, encoding: .utf8) else { return nil }
-            let pattern = "\"videoId\":\"([A-Za-z0-9_-]{11})\""
-            guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
             let ns = html as NSString
-            let matches = regex.matches(in: html, range: NSRange(location: 0, length: min(ns.length, 120_000)))
-            for match in matches {
-                if match.numberOfRanges > 1 {
-                    let vid = ns.substring(with: match.range(at: 1))
-                    ytCache[key] = vid
-                    return vid
-                }
+            let fullRange = NSRange(location: 0, length: ns.length)
+
+            let pattern1 = "\"videoId\":\"([A-Za-z0-9_-]{11})\""
+            if let regex1 = try? NSRegularExpression(pattern: pattern1),
+               let match = regex1.firstMatch(in: html, range: fullRange),
+               match.numberOfRanges > 1 {
+                let vid = ns.substring(with: match.range(at: 1))
+                ytCache[key] = vid
+                return vid
+            }
+
+            let pattern2 = "watch\\?v=([A-Za-z0-9_-]{11})"
+            if let regex2 = try? NSRegularExpression(pattern: pattern2),
+               let match = regex2.firstMatch(in: html, range: fullRange),
+               match.numberOfRanges > 1 {
+                let vid = ns.substring(with: match.range(at: 1))
+                ytCache[key] = vid
+                return vid
             }
         } catch { }
         return nil

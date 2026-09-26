@@ -176,11 +176,13 @@ private final class SilentAudioKeepAlive {
             }
         }
 
-        YouTubePlayer.shared.onError = { [weak self] _ in
+        YouTubePlayer.shared.onError = { [weak self] code in
             Task { @MainActor in
                 guard let self, self.isYouTubeActive, let cur = self.current else { return }
-                if let stream = cur.streamURL, let url = URL(string: stream) {
-                    self.startAVPlayerFallback(url: url)
+                if code == 100 || code == 101 || code == 150 {
+                    if let stream = cur.streamURL, let url = URL(string: stream) {
+                        self.startAVPlayerFallback(url: url)
+                    }
                 }
             }
         }

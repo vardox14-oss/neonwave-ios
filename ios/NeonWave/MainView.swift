@@ -59,8 +59,8 @@ struct MainView: View {
         }
         .overlay(alignment: .bottomTrailing) {
             YouTubePlayerWebView()
-                .frame(width: 1, height: 1)
-                .opacity(0.01)
+                .frame(width: 320, height: 240)
+                .offset(x: -9999, y: -9999)
                 .allowsHitTesting(false)
         }
         .fullScreenCover(isPresented: $showPlayer) { PlayerView() }
