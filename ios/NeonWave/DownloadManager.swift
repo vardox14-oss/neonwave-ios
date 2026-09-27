@@ -1,6 +1,8 @@
 import Foundation
 import AVFoundation
 import Combine
+import UIKit
+import SwiftUI
 
 final class DownloadManager: NSObject, ObservableObject, URLSessionDownloadDelegate {
     static let shared = DownloadManager()
