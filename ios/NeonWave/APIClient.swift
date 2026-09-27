@@ -61,8 +61,9 @@ struct APIClient {
         if !queryItems.isEmpty { components?.queryItems = queryItems }
         guard let finalURL = components?.url else { throw URLError(.badURL) }
         var request = URLRequest(url: finalURL)
-        request.httpMethod = method; request.timeoutInterval = 30; request.httpShouldHandleCookies = false
+        request.httpMethod = method; request.timeoutInterval = 8; request.httpShouldHandleCookies = false
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("true", forHTTPHeaderField: "Bypass-Tunnel-Reminder")
         if authenticated, let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         if let body { request.httpBody = try JSONSerialization.data(withJSONObject: body) }
         return request
