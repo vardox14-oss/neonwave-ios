@@ -103,7 +103,11 @@ import UniformTypeIdentifiers
         // 2. Ajouter les titres à la bibliothèque et à la playlist
         var addedIDs: [String] = []
         for track in data.tracks {
-            if !snapshot.tracks.contains(where: { $0.id == track.id }) {
+            if let existingIndex = snapshot.tracks.firstIndex(where: { $0.id == track.id }) {
+                if let newArt = track.artworkURL, !newArt.isEmpty {
+                    snapshot.tracks[existingIndex].artworkURL = newArt
+                }
+            } else {
                 snapshot.tracks.append(track)
             }
             addedIDs.append(track.id)
