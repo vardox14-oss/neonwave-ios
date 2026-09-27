@@ -694,4 +694,70 @@ enum MusicCatalogService {
         }
     }
 
+    // ─── Spotify Playlist Import ─────────────────────────────────────────────
+
+    struct SpotifyPlaylistImport {
+        let name: String
+        let description: String
+        let imageUrl: String
+        let ownerName: String
+        let totalTracks: Int
+        let tracks: [Track]
+    }
+
+    private struct SpotifyImportResponse: Decodable {
+        struct ImportedTrack: Decodable {
+            let id: String
+            let spotifyId: String?
+            let title: String
+            let artist: String
+            let album: String?
+            let duration: Double
+            let thumbnail: String?
+        }
+        let name: String
+        let description: String?
+        let imageUrl: String?
+        let ownerName: String?
+        let totalTracks: Int?
+        let tracks: [ImportedTrack]
+    }
+
+    static func importSpotifyPlaylist(_ urlString: String) async throws -> SpotifyPlaylistImport {
+        let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw MessageError("URL Spotify invalide.") }
+
+        guard let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let response: SpotifyImportResponse = try? await APIClient().call(
+                "api/spotify/import-playlist",
+                authenticated: false,
+                queryItems: [URLQueryItem(name: "url", value: encoded)]
+              ) else {
+            throw MessageError("Impossible de charger la playlist. Vérifiez l'URL et votre connexion.")
+        }
+
+        let tracks = response.tracks.map { item in
+            Track(
+                id: item.id,
+                title: item.title,
+                artist: item.artist,
+                duration: item.duration,
+                album: item.album,
+                artworkURL: item.thumbnail,
+                streamURL: nil,
+                videoId: nil,
+                spotifyId: item.spotifyId
+            )
+        }
+
+        return SpotifyPlaylistImport(
+            name: response.name,
+            description: response.description ?? "",
+            imageUrl: response.imageUrl ?? "",
+            ownerName: response.ownerName ?? "",
+            totalTracks: response.totalTracks ?? tracks.count,
+            tracks: tracks
+        )
+    }
+
 }

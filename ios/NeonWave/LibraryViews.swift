@@ -193,12 +193,26 @@ struct LibraryView: View {
     let importFiles: () -> Void
     @State private var newPlaylist = false
     @State private var playlistName = ""
+    @State private var showSpotifyImport = false
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
                 HStack {
                     SectionHeading(title: "Votre bibliothèque", eyebrow: "VOTRE COLLECTION")
-                    IconButton(symbol: "plus", label: "Créer une playlist") { newPlaylist = true }.background(NW.surface, in: Circle())
+                    HStack(spacing: 10) {
+                        Button {
+                            showSpotifyImport = true
+                        } label: {
+                            Image(systemName: "arrow.down.to.line.compact")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(NW.cyan)
+                                .frame(width: 36, height: 36)
+                                .background(NW.surface, in: Circle())
+                        }
+                        .accessibilityLabel("Importer une playlist Spotify")
+                        IconButton(symbol: "plus", label: "Créer une playlist") { newPlaylist = true }.background(NW.surface, in: Circle())
+                    }
                 }.padding(.top, 16)
                 ZStack(alignment: .leading) {
                     LinearGradient(colors: [NW.violet.opacity(0.72), NW.blue.opacity(0.42), NW.surface], startPoint: .topLeading, endPoint: .bottomTrailing)
@@ -259,6 +273,9 @@ struct LibraryView: View {
             Button("Annuler", role: .cancel) { playlistName = "" }
             Button("Créer") { library.createPlaylist(playlistName); playlistName = "" }
         } message: { Text("Vous pourrez y ajouter des titres de votre bibliothèque.") }
+        .sheet(isPresented: $showSpotifyImport) {
+            SpotifyPlaylistImportSheet()
+        }
     }
     private func collectionRow(_ title: String, subtitle: String, symbol: String, index: Int) -> some View {
         HStack(spacing: 16) {
@@ -275,6 +292,210 @@ struct LibraryView: View {
         }.frame(maxWidth: .infinity)
     }
 }
+
+// ─── Spotify Playlist Import Sheet ───────────────────────────────────────────
+struct SpotifyPlaylistImportSheet: View {
+    @EnvironmentObject private var library: LibraryStore
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var url = ""
+    @State private var loading = false
+    @State private var errorMsg: String?
+    @State private var preview: MusicCatalogService.SpotifyPlaylistImport?
+    @State private var imported = false
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                NW.background.ignoresSafeArea()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 24) {
+                        // ── Header ──
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(spacing: 10) {
+                                Image(systemName: "music.note.list")
+                                    .font(.system(size: 22, weight: .semibold))
+                                    .foregroundStyle(NW.cyan)
+                                Text("Importer depuis Spotify")
+                                    .font(.title2.bold())
+                            }
+                            Text("Collez le lien d'une playlist publique Spotify pour l'importer directement dans NeonWave.")
+                                .font(.subheadline)
+                                .foregroundStyle(NW.muted)
+                        }
+                        .padding(.top, 8)
+
+                        // ── URL Input ──
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("LIEN SPOTIFY")
+                                .font(.system(size: 10, weight: .bold))
+                                .tracking(1.4)
+                                .foregroundStyle(NW.muted)
+
+                            HStack(spacing: 12) {
+                                Image(systemName: "link")
+                                    .foregroundStyle(NW.muted)
+                                TextField("https://open.spotify.com/playlist/…", text: $url)
+                                    .autocorrectionDisabled()
+                                    .autocapitalization(.none)
+                                    .keyboardType(.URL)
+                                    .onChange(of: url) { _, _ in
+                                        preview = nil
+                                        errorMsg = nil
+                                        imported = false
+                                    }
+                                if !url.isEmpty {
+                                    Button { url = "" } label: {
+                                        Image(systemName: "xmark.circle.fill").foregroundStyle(NW.muted)
+                                    }
+                                }
+                            }
+                            .padding(14)
+                            .background(NW.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.10)))
+                        }
+
+                        // ── Error ──
+                        if let err = errorMsg {
+                            HStack(spacing: 8) {
+                                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                                Text(err).font(.subheadline).foregroundStyle(.orange)
+                            }
+                            .padding(12)
+                            .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+                        }
+
+                        // ── Preview ──
+                        if let p = preview {
+                            VStack(alignment: .leading, spacing: 16) {
+                                HStack(spacing: 14) {
+                                    if !p.imageUrl.isEmpty, let imgURL = URL(string: p.imageUrl) {
+                                        AsyncImage(url: imgURL) { phase in
+                                            if case .success(let img) = phase { img.resizable().scaledToFill() }
+                                            else { Color.white.opacity(0.06) }
+                                        }
+                                        .frame(width: 64, height: 64)
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                                    }
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(p.name).font(.headline).foregroundStyle(.white).lineLimit(1)
+                                        if !p.ownerName.isEmpty {
+                                            Text("Par \(p.ownerName)").font(.caption).foregroundStyle(NW.muted)
+                                        }
+                                        Text("\(p.totalTracks) titres trouvés")
+                                            .font(.caption.bold())
+                                            .foregroundStyle(NW.cyan)
+                                    }
+                                }
+                                .padding(14)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(NW.surface, in: RoundedRectangle(cornerRadius: 16))
+                                .overlay(RoundedRectangle(cornerRadius: 16).stroke(NW.cyan.opacity(0.25)))
+
+                                if !p.description.isEmpty {
+                                    Text(p.description)
+                                        .font(.caption)
+                                        .foregroundStyle(NW.muted)
+                                        .lineLimit(3)
+                                }
+
+                                // Track preview (first 5)
+                                VStack(spacing: 4) {
+                                    ForEach(p.tracks.prefix(5)) { track in
+                                        HStack(spacing: 12) {
+                                            CoverArt(track: track, remoteURL: track.artworkURL, radius: 8)
+                                                .frame(width: 40, height: 40)
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text(track.title).font(.caption.bold()).foregroundStyle(.white).lineLimit(1)
+                                                Text(track.artist).font(.caption2).foregroundStyle(NW.muted).lineLimit(1)
+                                            }
+                                            Spacer()
+                                            Text(track.duration.clockTime).font(.caption2.monospacedDigit()).foregroundStyle(NW.muted)
+                                        }
+                                        .padding(.vertical, 4)
+                                    }
+                                    if p.totalTracks > 5 {
+                                        Text("+ \(p.totalTracks - 5) autre\(p.totalTracks - 5 > 1 ? "s" : "") titre\(p.totalTracks - 5 > 1 ? "s" : "")")
+                                            .font(.caption)
+                                            .foregroundStyle(NW.muted)
+                                            .padding(.top, 4)
+                                    }
+                                }
+                            }
+                        }
+
+                        // ── Success ──
+                        if imported {
+                            HStack(spacing: 10) {
+                                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.title3)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Playlist importée !").font(.subheadline.bold()).foregroundStyle(.white)
+                                    Text("Retrouvez-la dans vos playlists.").font(.caption).foregroundStyle(NW.muted)
+                                }
+                            }
+                            .padding(14)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.green.opacity(0.3)))
+                        }
+
+                        Spacer()
+                    }
+                    .padding(20)
+                    .padding(.bottom, 40)
+                }
+            }
+            .navigationTitle("Importer une playlist")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Fermer") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if loading {
+                        ProgressView().tint(NW.blue)
+                    } else if preview == nil || imported {
+                        Button("Charger") {
+                            Task { await loadPreview() }
+                        }
+                        .disabled(url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || loading)
+                        .font(.subheadline.bold())
+                    } else {
+                        Button("Importer") {
+                            Task { await doImport() }
+                        }
+                        .font(.subheadline.bold())
+                        .foregroundStyle(NW.cyan)
+                    }
+                }
+            }
+        }
+    }
+
+    private func loadPreview() async {
+        let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        loading = true
+        errorMsg = nil
+        preview = nil
+        do {
+            let result = try await MusicCatalogService.importSpotifyPlaylist(trimmed)
+            preview = result
+        } catch {
+            errorMsg = error.localizedDescription
+        }
+        loading = false
+    }
+
+    private func doImport() async {
+        guard let p = preview else { return }
+        loading = true
+        await library.importSpotifyPlaylist(p)
+        imported = true
+        loading = false
+    }
+}
+
 
 struct PlaylistPickerView: View {
     @EnvironmentObject private var library: LibraryStore

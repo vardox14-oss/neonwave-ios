@@ -93,6 +93,28 @@ import UniformTypeIdentifiers
     func setHaptics(_ value: Bool) { snapshot.haptics = value; persist() }
     func haptic() { if snapshot.haptics { UISelectionFeedbackGenerator().selectionChanged() } }
 
+    func importSpotifyPlaylist(_ data: MusicCatalogService.SpotifyPlaylistImport) async {
+        guard !data.tracks.isEmpty else { return }
+        // 1. Créer la playlist
+        let cleanName = data.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let playlistName = cleanName.isEmpty ? "Playlist Spotify" : String(cleanName.prefix(80))
+        let playlist = Playlist(name: playlistName)
+        snapshot.playlists.insert(playlist, at: 0)
+        // 2. Ajouter les titres à la bibliothèque et à la playlist
+        var addedIDs: [String] = []
+        for track in data.tracks {
+            if !snapshot.tracks.contains(where: { $0.id == track.id }) {
+                snapshot.tracks.append(track)
+            }
+            addedIDs.append(track.id)
+        }
+        // 3. Remplir la playlist
+        guard let index = snapshot.playlists.firstIndex(where: { $0.id == playlist.id }) else { persist(); return }
+        snapshot.playlists[index].trackIDs = addedIDs
+        persist()
+        haptic()
+    }
+
     func importFiles(_ urls: [URL]) async {
         guard !importing else { return }
         importing = true
