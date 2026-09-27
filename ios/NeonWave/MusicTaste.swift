@@ -97,23 +97,6 @@ enum ArtistDiscoveryService {
     }
 
     static func featured() async -> [ArtistChoice] {
-#if APPSTORE
-        return await withTaskGroup(of: ArtistChoice?.self, returning: [ArtistChoice].self) { group in
-            for name in MusicTasteStore.featuredNames {
-                group.addTask {
-                    await AppleMusicService.searchArtists(name, limit: 5).first {
-                        $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
-                    }
-                }
-            }
-            var artists: [ArtistChoice] = []
-            for await artist in group {
-                if let artist { artists.append(artist) }
-            }
-            let order = Dictionary(uniqueKeysWithValues: MusicTasteStore.featuredNames.enumerated().map { ($1.lowercased(), $0) })
-            return artists.sorted { (order[$0.name.lowercased()] ?? 999) < (order[$1.name.lowercased()] ?? 999) }
-        }
-#else
         guard AppConfiguration.apiURL != nil else {
             return MusicTasteStore.featuredNames.map { ArtistChoice(name: $0) }
         }
@@ -126,15 +109,11 @@ enum ArtistDiscoveryService {
         }
         let byName = Dictionary(items.map { ($0.name.lowercased(), $0) }, uniquingKeysWith: { first, _ in first })
         return MusicTasteStore.featuredNames.compactMap { byName[$0.lowercased()] }
-#endif
     }
 
     static func search(_ query: String) async -> [ArtistChoice] {
         let value = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard value.count >= 2 else { return [] }
-#if APPSTORE
-        return await AppleMusicService.searchArtists(value)
-#else
         if AppConfiguration.apiURL != nil {
             let response: ArtistResponse? = try? await APIClient().call(
                 "api/spotify/search-artists",
@@ -149,7 +128,6 @@ enum ArtistDiscoveryService {
               let (data, _) = try? await URLSession.shared.data(from: url),
               let response = try? JSONDecoder().decode(DeezerResponse.self, from: data) else { return [] }
         return (response.data ?? []).map { ArtistChoice(spotifyId: "", name: $0.name, imageUrl: $0.picture_xl ?? $0.picture_big ?? "", source: "deezer") }
-#endif
     }
 }
 
@@ -168,7 +146,7 @@ struct TasteOnboardingView: View {
 
     var body: some View {
         ZStack {
-            PremiumBackdrop(accent: NW.violet)
+            LinearGradient(colors: [Color(red: 0.035, green: 0.02, blue: 0.12), NW.background, Color(red: 0.01, green: 0.12, blue: 0.13)], startPoint: .topLeading, endPoint: .bottomTrailing).ignoresSafeArea()
             Circle().fill(NW.blue.opacity(0.22)).frame(width: 330).blur(radius: 80).offset(x: 170, y: -310)
             VStack(spacing: 0) {
                 HStack {
@@ -235,7 +213,7 @@ struct TasteOnboardingView: View {
                 if suggestions.isEmpty && !searching && query.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 {
                     VStack(spacing: 10) {
                         Image(systemName: "music.mic").font(.title2).foregroundStyle(NW.blue)
-                        Text("Aucun profil Spotify précis").font(.subheadline.bold())
+                        Text("Aucun profil d'artiste trouvé").font(.subheadline.bold())
                         Text("Essayez le nom complet de l’artiste.").font(.caption).foregroundStyle(.white.opacity(0.55))
                     }.frame(maxWidth: .infinity).padding(.top, 40)
                 } else {
@@ -281,7 +259,7 @@ struct TasteOnboardingView: View {
                     }
                 }.frame(height: 92).scaleEffect(selected ? 1.04 : 1)
                 Text(artist.name).font(.caption.bold()).lineLimit(1)
-                if artist.source == "spotify" { Text("SPOTIFY").font(.system(size: 7, weight: .bold)).tracking(1.1).foregroundStyle(.green.opacity(0.85)) }
+                if !artist.imageUrl.isEmpty { Text("VÉRIFIÉ").font(.system(size: 7, weight: .bold)).tracking(1.1).foregroundStyle(NW.blue.opacity(0.85)) }
             }
         }.buttonStyle(PressStyle()).animation(.spring(response: 0.35, dampingFraction: 0.76), value: selected)
     }

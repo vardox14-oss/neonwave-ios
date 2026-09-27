@@ -88,11 +88,7 @@ enum MusicCatalogService {
 
     static func searchTracks(_ query: String) async -> [Track] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return [] }
-#if APPSTORE
-        return await AppleMusicService.searchTracks(trimmed)
-#else
-        guard let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return [] }
+        guard !trimmed.isEmpty, let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return [] }
 
         // Same Spotify-first catalogue as the desktop app. Keeping spotifyId is
         // essential: it is also the key used to request the real Spotify Canvas.
@@ -168,16 +164,11 @@ enum MusicCatalogService {
         }
 
         return []
-#endif
     }
 
     static func searchAlbums(_ query: String) async -> [Album] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return [] }
-#if APPSTORE
-        return await AppleMusicService.searchAlbums(trimmed)
-#else
-        guard let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return [] }
+        guard !trimmed.isEmpty, let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return [] }
 
         if let url = URL(string: "https://api.deezer.com/search/album?q=\(encoded)&limit=20") {
             do {
@@ -199,17 +190,9 @@ enum MusicCatalogService {
         }
 
         return []
-#endif
     }
 
     static func fetchAlbumTracks(albumId: String, albumTitle: String, artistName: String, coverURL: String?) async -> [Track] {
-#if APPSTORE
-        return await AppleMusicService.albumTracks(
-            albumID: albumId.replacingOccurrences(of: "am-", with: ""),
-            title: albumTitle,
-            artist: artistName
-        )
-#else
         let cleanId = albumId.replacingOccurrences(of: "dz-", with: "")
         guard let url = URL(string: "https://api.deezer.com/album/\(cleanId)/tracks?limit=50") else { return [] }
         do {
@@ -231,181 +214,36 @@ enum MusicCatalogService {
             }
         } catch { }
         return []
-#endif
     }
 
     private static var ytCache: [String: String] = [:]
 
     static func nativeStreamURL(videoId: String) async -> URL? {
-#if APPSTORE
-        return nil
-#else
         guard let baseURL = AppConfiguration.apiURL,
               let response: StreamTicketResponse = try? await APIClient().call(
                 "api/music/streams/\(videoId)/ticket",
                 method: "POST"
               ) else { return nil }
         return URL(string: response.path, relativeTo: baseURL)?.absoluteURL
-#endif
-    }
-
-    struct YouTubeCandidate: Equatable {
-        let videoId: String
-        let title: String
-        let channel: String
-        let duration: Double?
     }
 
     static func resolveYouTubeId(title: String, artist: String, duration: Double = 0, spotifyId: String? = nil) async -> String? {
-#if APPSTORE
-        return nil
-#else
         let key = "\(artist.lowercased())|\(title.lowercased())"
         if let cached = ytCache[key] { return cached }
 
-        if AppConfiguration.apiURL != nil {
-            let path = spotifyId.map { "api/music/resolve/\($0)" } ?? "api/music/resolve-by-metadata"
-            let query = [
-                URLQueryItem(name: "title", value: title),
-                URLQueryItem(name: "artist", value: artist),
-                URLQueryItem(name: "durationMs", value: String(Int(duration * 1000)))
-            ]
-            if let resolved: ResolveResponse = try? await APIClient().call(path, queryItems: query), !resolved.videoId.isEmpty {
-                ytCache[key] = resolved.videoId
-                return resolved.videoId
-            }
-        }
+        guard AppConfiguration.apiURL != nil else { return nil }
 
-        let cleanTitle = title
-            .replacingOccurrences(of: "(feat.", with: "")
-            .replacingOccurrences(of: "(ft.", with: "")
-            .replacingOccurrences(of: "feat.", with: "")
-            .replacingOccurrences(of: "ft.", with: "")
-        let query = "\(artist) \(cleanTitle) official audio".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        guard let url = URL(string: "https://www.youtube.com/results?search_query=\(query)") else { return nil }
-
-        var request = URLRequest(url: url)
-        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
-        request.setValue("SOCS=CAESEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg; CONSENT=YES+", forHTTPHeaderField: "Cookie")
-        request.setValue("fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7", forHTTPHeaderField: "Accept-Language")
-        request.timeoutInterval = 8
-
-        do {
-            let (data, _) = try await URLSession.shared.data(for: request)
-            guard let html = String(data: data, encoding: .utf8) else { return nil }
-            let ns = html as NSString
-            let fullRange = NSRange(location: 0, length: ns.length)
-
-            let candidates = parseYouTubeCandidates(html)
-            if let best = bestYouTubeCandidate(candidates, title: title, artist: artist, duration: duration) {
-                ytCache[key] = best.videoId
-                return best.videoId
-            }
-
-            let pattern1 = "\"videoId\":\"([A-Za-z0-9_-]{11})\""
-            if let regex1 = try? NSRegularExpression(pattern: pattern1),
-               let match = regex1.firstMatch(in: html, range: fullRange),
-               match.numberOfRanges > 1 {
-                let vid = ns.substring(with: match.range(at: 1))
-                ytCache[key] = vid
-                return vid
-            }
-
-            let pattern2 = "watch\\?v=([A-Za-z0-9_-]{11})"
-            if let regex2 = try? NSRegularExpression(pattern: pattern2),
-               let match = regex2.firstMatch(in: html, range: fullRange),
-               match.numberOfRanges > 1 {
-                let vid = ns.substring(with: match.range(at: 1))
-                ytCache[key] = vid
-                return vid
-            }
-        } catch { }
-        return nil
-#endif
-    }
-
-    static func bestYouTubeCandidate(_ candidates: [YouTubeCandidate], title: String, artist: String, duration: Double) -> YouTubeCandidate? {
-        candidates.max { youtubeScore($0, title: title, artist: artist, duration: duration) < youtubeScore($1, title: title, artist: artist, duration: duration) }
-    }
-
-    private static func youtubeScore(_ candidate: YouTubeCandidate, title: String, artist: String, duration: Double) -> Double {
-        let wantedTitle = normalized(title)
-        let wantedArtist = normalized(artist)
-        let candidateTitle = normalized(candidate.title)
-        let candidateChannel = normalized(candidate.channel)
-        let combined = candidateTitle + " " + candidateChannel
-        let wantedTokens = Set(wantedTitle.split(separator: " ").map(String.init).filter { $0.count > 1 })
-        let candidateTokens = Set(candidateTitle.split(separator: " ").map(String.init))
-        var score = 0.0
-        if candidateTitle.contains(wantedTitle) { score += 80 }
-        if !wantedTokens.isEmpty { score += 60 * Double(wantedTokens.intersection(candidateTokens).count) / Double(wantedTokens.count) }
-        if combined.contains(wantedArtist) { score += 55 }
-        if combined.contains("official audio") || combined.contains("audio officiel") { score += 35 }
-        if candidateChannel.contains("topic") { score += 24 }
-        if combined.contains("official") || combined.contains("officiel") { score += 12 }
-        let requestedSpecialTerms = ["live", "remix", "sped up", "slowed", "nightcore", "karaoke", "cover"]
-        for term in requestedSpecialTerms where candidateTitle.contains(term) && !wantedTitle.contains(term) { score -= 65 }
-        if duration > 0, let candidateDuration = candidate.duration {
-            let delta = abs(duration - candidateDuration)
-            if delta <= 2 { score += 65 }
-            else if delta <= 5 { score += 48 }
-            else if delta <= 12 { score += 24 }
-            else if delta > 30 { score -= min(90, delta) }
-        }
-        return score
-    }
-
-    static func parseYouTubeCandidates(_ html: String) -> [YouTubeCandidate] {
-        let ns = html as NSString
-        let pattern = #"\"videoId\":\"([A-Za-z0-9_-]{11})\""#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
-        var candidates: [YouTubeCandidate] = []
-        var seen = Set<String>()
-        for match in regex.matches(in: html, range: NSRange(location: 0, length: ns.length)).prefix(80) {
-            let id = ns.substring(with: match.range(at: 1))
-            guard seen.insert(id).inserted else { continue }
-            let start = match.range.location
-            let length = min(5000, ns.length - start)
-            let window = ns.substring(with: NSRange(location: start, length: length))
-            let title = firstJSONText(in: window, keys: ["title"]) ?? ""
-            guard !title.isEmpty else { continue }
-            let channel = firstJSONText(in: window, keys: ["ownerText", "longBylineText", "shortBylineText"]) ?? ""
-            let durationText = firstSimpleText(in: window, key: "lengthText")
-            candidates.append(YouTubeCandidate(videoId: id, title: title, channel: channel, duration: durationText.flatMap(parseClock)))
-        }
-        return candidates
-    }
-
-    private static func firstJSONText(in value: String, keys: [String]) -> String? {
-        for key in keys {
-            let escapedKey = NSRegularExpression.escapedPattern(for: key)
-            let patterns = [
-                "\\\"\(escapedKey)\\\":\\{\\\"runs\\\":\\[\\{\\\"text\\\":\\\"((?:\\\\.|[^\\\"])*)\\\"",
-                "\\\"\(escapedKey)\\\":\\{\\\"simpleText\\\":\\\"((?:\\\\.|[^\\\"])*)\\\""
-            ]
-            for pattern in patterns {
-                guard let regex = try? NSRegularExpression(pattern: pattern),
-                      let match = regex.firstMatch(in: value, range: NSRange(value.startIndex..., in: value)),
-                      let range = Range(match.range(at: 1), in: value) else { continue }
-                return decodeJSONString(String(value[range]))
-            }
+        let path = spotifyId.map { "api/music/resolve/\($0)" } ?? "api/music/resolve-by-metadata"
+        let query = [
+            URLQueryItem(name: "title", value: title),
+            URLQueryItem(name: "artist", value: artist),
+            URLQueryItem(name: "durationMs", value: String(Int(duration * 1000)))
+        ]
+        if let resolved: ResolveResponse = try? await APIClient().call(path, queryItems: query), !resolved.videoId.isEmpty {
+            ytCache[key] = resolved.videoId
+            return resolved.videoId
         }
         return nil
-    }
-
-    private static func firstSimpleText(in value: String, key: String) -> String? {
-        firstJSONText(in: value, keys: [key])
-    }
-
-    private static func decodeJSONString(_ escaped: String) -> String {
-        let wrapped = "\"\(escaped)\""
-        return (try? JSONDecoder().decode(String.self, from: Data(wrapped.utf8))) ?? escaped
-    }
-
-    private static func parseClock(_ value: String) -> Double? {
-        let parts = value.split(separator: ":").compactMap { Double($0) }
-        guard !parts.isEmpty else { return nil }
-        return parts.reversed().enumerated().reduce(0) { $0 + $1.element * pow(60, Double($1.offset)) }
     }
 
     private static func normalized(_ value: String) -> String {

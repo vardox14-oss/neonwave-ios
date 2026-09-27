@@ -53,13 +53,6 @@ final class YouTubePlayer: NSObject, ObservableObject, WKScriptMessageHandler, W
         <html>
         <head>
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-        <script>
-        try {
-            Object.defineProperty(document, 'hidden', { get: function() { return false; } });
-            Object.defineProperty(document, 'visibilityState', { get: function() { return 'visible'; } });
-            document.addEventListener('visibilitychange', function(e) { e.stopImmediatePropagation(); }, true);
-        } catch(e) {}
-        </script>
         <script src="https://www.youtube.com/iframe_api"></script>
         <style>
         * { margin:0; padding:0; background:#000; overflow:hidden; }

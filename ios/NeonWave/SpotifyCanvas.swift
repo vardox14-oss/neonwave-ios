@@ -16,7 +16,7 @@ enum SpotifyCanvasService {
 
     static func load(for track: Track) async -> SpotifyCanvasState {
         guard AppConfiguration.apiURL != nil else {
-            return .unavailable("Le service NeonWave doit être connecté pour charger les Canvas Spotify.")
+            return .unavailable("Le service NeonWave doit être connecté pour charger les vidéos d'ambiance.")
         }
         let targetId: String
         var queryItems: [URLQueryItem] = []
@@ -29,19 +29,19 @@ enum SpotifyCanvasService {
         }
         do {
             let response: CanvasResponse = try await APIClient().call(
-                "api/spotify/canvas/\(targetId)",
+                "api/ambient/\(targetId)",
                 authenticated: false,
                 queryItems: queryItems
             )
             guard response.connected else {
-                return .unavailable("Connectez Spotify dans NeonWave sur votre PC pour activer les Canvas.")
+                return .unavailable("Le service vidéo d'ambiance n'est pas actif sur votre serveur NeonWave.")
             }
             guard let value = response.canvasUrl, let url = URL(string: value) else {
-                return .unavailable("Spotify ne propose pas de Canvas pour ce morceau.")
+                return .unavailable("Aucune vidéo d'ambiance disponible pour ce morceau.")
             }
             return .ready(url)
         } catch {
-            return .unavailable("Le Canvas Spotify est momentanément inaccessible.")
+            return .unavailable("La vidéo d'ambiance est momentanément inaccessible.")
         }
     }
 }
@@ -98,7 +98,6 @@ struct LoopingCanvasVideo: UIViewRepresentable {
 }
 
 struct SpotifyCanvasView: View {
-    @EnvironmentObject private var library: LibraryStore
     let track: Track
     let isPlaying: Bool
     @State private var state: SpotifyCanvasState = .loading
@@ -111,12 +110,12 @@ struct SpotifyCanvasView: View {
                 RoundedRectangle(cornerRadius: 28).fill(Color.white.opacity(0.04))
                 VStack(spacing: 14) {
                     ProgressView().tint(.white)
-                    Text("CHARGEMENT DU CANVAS SPOTIFY").font(.system(size: 9, weight: .bold)).tracking(1.5).foregroundStyle(NW.muted)
+                    Text("CHARGEMENT DU FOND VIDÉO").font(.system(size: 9, weight: .bold)).tracking(1.5).foregroundStyle(NW.muted)
                 }
             case .ready(let url):
                 LoopingCanvasVideo(url: url, isPlaying: isPlaying)
                     .overlay(alignment: .bottomLeading) {
-                        Label("CANVAS SPOTIFY", systemImage: "sparkles.tv.fill")
+                        Label("VIDÉO D'AMBIANCE", systemImage: "sparkles.tv.fill")
                             .font(.system(size: 9, weight: .bold)).tracking(1.3)
                             .padding(.horizontal, 12).padding(.vertical, 8)
                             .background(.ultraThinMaterial, in: Capsule()).padding(14)
@@ -133,7 +132,7 @@ struct SpotifyCanvasView: View {
                     Rectangle().fill(.black.opacity(0.52))
                     VStack(spacing: 12) {
                         Image(systemName: "sparkles.tv.fill").font(.system(size: 38, weight: .light)).foregroundStyle(NW.blue)
-                        Text("Canvas Spotify").font(.title3.bold())
+                        Text("Vidéo d'ambiance").font(.title3.bold())
                         Text(message).font(.caption).foregroundStyle(.white.opacity(0.7)).multilineTextAlignment(.center).padding(.horizontal, 30)
                         Button { reloadID = UUID() } label: { Label("Réessayer", systemImage: "arrow.clockwise").font(.caption.bold()).padding(.horizontal, 16).padding(.vertical, 10).background(.white.opacity(0.12), in: Capsule()) }
                     }
@@ -145,10 +144,6 @@ struct SpotifyCanvasView: View {
         .clipShape(RoundedRectangle(cornerRadius: 28))
         .overlay(RoundedRectangle(cornerRadius: 28).stroke(.white.opacity(0.08)))
         .task(id: "\(track.id)-\(reloadID.uuidString)") {
-            if let local = library.canvasURL(track) {
-                state = .ready(local)
-                return
-            }
             state = .loading
             state = await SpotifyCanvasService.load(for: track)
         }

@@ -22,6 +22,9 @@
     <key>NeonWaveAPIURL</key><string>$(NEONWAVE_API_URL)</string>
     <key>NeonWavePrivacyURL</key><string>$(NEONWAVE_PRIVACY_URL)</string>
     <key>NeonWaveSupportURL</key><string>$(NEONWAVE_SUPPORT_URL)</string>
-    <key>NSAppleMusicUsageDescription</key>
-    <string>NeonWave utilise Apple Music pour rechercher et lire les titres que vous choisissez.</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoadsInWebContent</key>
+        <true/>
+    </dict>
 </dict></plist>
