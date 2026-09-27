@@ -7,9 +7,26 @@ final class DownloadManager: NSObject, ObservableObject, URLSessionDownloadDeleg
     static let sessionIdentifier = "app.neonwave.ios.audio-downloads"
     @Published private(set) var progress: [String: Double] = [:]
     @Published var error: String?
+    @Published var toastMessage: String?
     var backgroundCompletion: (() -> Void)?
     private weak var library: LibraryStore?
     private var preparationTasks: [String: Task<Void, Never>] = [:]
+    private var toastDismissTask: Task<Void, Never>?
+
+    @MainActor func showSuccessToast(_ message: String) {
+        toastDismissTask?.cancel()
+        toastMessage = message
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        toastDismissTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                if self.toastMessage == message {
+                    self.toastMessage = nil
+                }
+            }
+        }
+    }
     private lazy var session: URLSession = {
         let configuration = URLSessionConfiguration.background(withIdentifier: Self.sessionIdentifier)
         configuration.sessionSendsLaunchEvents = true
@@ -184,6 +201,9 @@ final class DownloadManager: NSObject, ObservableObject, URLSessionDownloadDeleg
                 guard self.library?.userID == info.userID else { return }
                 self.library?.finishDownload(trackID: info.trackID, fileName: info.destination.lastPathComponent)
                 self.progress[info.trackID] = nil
+                let trackTitle = self.library?.tracks.first(where: { $0.id == info.trackID })?.title
+                let titlePrefix = trackTitle.map { "« \($0) »" } ?? "Musique"
+                self.showSuccessToast("\(titlePrefix) téléchargée avec succès")
                 if let library = self.library { Task { await library.cacheOfflineMedia(trackID: info.trackID) } }
             }
         } catch {

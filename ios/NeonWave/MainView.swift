@@ -57,12 +57,34 @@ struct MainView: View {
                 }
             }
             .overlay(alignment: .top) {
-                if library.importing {
-                    Label("Import de vos titres…", systemImage: "waveform")
-                        .font(.caption.bold()).padding(.horizontal, 16).padding(.vertical, 12)
-                        .background(.ultraThinMaterial, in: Capsule()).padding(.top, 54)
+                VStack(spacing: 8) {
+                    if let toast = downloads.toastMessage {
+                        HStack(spacing: 10) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(Color.green)
+                                .font(.system(size: 16, weight: .bold))
+                            Text(toast)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 12)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .overlay(Capsule().stroke(Color.green.opacity(0.35), lineWidth: 1))
+                        .shadow(color: .black.opacity(0.35), radius: 14, y: 5)
                         .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+
+                    if library.importing {
+                        Label("Import de vos titres…", systemImage: "waveform")
+                            .font(.caption.bold()).padding(.horizontal, 16).padding(.vertical, 12)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
                 }
+                .padding(.top, 54)
+                .animation(.spring(response: 0.35, dampingFraction: 0.8), value: downloads.toastMessage)
             }
             .fullScreenCover(isPresented: $showPlayer) { PlayerView(onClose: { showPlayer = false }) }
             .sheet(isPresented: $showSettings) { SettingsView() }

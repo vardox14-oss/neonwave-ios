@@ -101,16 +101,49 @@ struct TrackCollectionView: View {
                 }
                 HStack(spacing: 12) {
                     PrimaryButton(title: "Écouter", symbol: "play.fill") {
-                        if let first = tracks.first(where: { library.localURL($0) != nil }) { player.play(first, in: tracks) }
-                    }.disabled(!tracks.contains { library.localURL($0) != nil })
+                        if let first = tracks.first(where: { player.isPlayable($0) }) ?? tracks.first {
+                            player.play(first, in: tracks)
+                        }
+                    }.disabled(tracks.isEmpty)
                     IconButton(symbol: "shuffle", label: "Écouter en aléatoire") {
-                        let available = tracks.filter { library.localURL($0) != nil }
-                        if let first = available.randomElement() { player.shuffle = true; player.play(first, in: available) }
+                        let available = tracks.filter { player.isPlayable($0) }
+                        if let first = (available.isEmpty ? tracks : available).randomElement() {
+                            player.shuffle = true
+                            player.play(first, in: available.isEmpty ? tracks : available)
+                        }
                     }.background(NW.surface, in: RoundedRectangle(cornerRadius: 16))
-                    if tracks.contains(where: { $0.canDownload && library.localURL($0) == nil }) {
-                        IconButton(symbol: "arrow.down.circle", label: "Télécharger cette playlist") { tracks.forEach(downloads.download) }
-                    }
                 }
+
+                let undownloaded = tracks.filter { $0.canDownload && library.localURL($0) == nil }
+                if !tracks.isEmpty {
+                    Button {
+                        if undownloaded.isEmpty {
+                            downloads.showSuccessToast("Tous les titres de cette playlist sont déjà téléchargés.")
+                        } else {
+                            undownloaded.forEach(downloads.download)
+                            downloads.showSuccessToast("Téléchargement de la playlist lancé (\(undownloaded.count) titre\(undownloaded.count > 1 ? "s" : ""))")
+                        }
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: undownloaded.isEmpty ? "checkmark.circle.fill" : "arrow.down.circle.fill")
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundStyle(undownloaded.isEmpty ? Color.green : NW.blue)
+                            Text(undownloaded.isEmpty ? "Playlist téléchargée" : "Télécharger la playlist (\(undownloaded.count))")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(.white)
+                            Spacer()
+                            if !undownloaded.isEmpty && undownloaded.contains(where: { downloads.progress[$0.id] != nil }) {
+                                ProgressView().tint(.white).scaleEffect(0.85)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(NW.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(undownloaded.isEmpty ? Color.green.opacity(0.3) : NW.blue.opacity(0.3), lineWidth: 1))
+                    }
+                    .buttonStyle(PressStyle())
+                }
+
                 if playlist != nil { Button { showAdd = true } label: { Label("Ajouter des titres", systemImage: "plus.circle").font(.subheadline.bold()) } }
                 if tracks.isEmpty { EmptyLibrary(symbol: symbol, title: "Une place pour vos titres", description: "Ajoutez vos morceaux préférés pour commencer votre collection.") }
                 LazyVStack(spacing: 2) { ForEach(tracks) { TrackRow(track: $0, context: tracks, playlist: playlist) } }
@@ -122,6 +155,15 @@ struct TrackCollectionView: View {
                 if let playlist {
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
+                            Button("Télécharger la playlist", systemImage: "arrow.down.circle") {
+                                let pending = tracks.filter { $0.canDownload && library.localURL($0) == nil }
+                                if pending.isEmpty {
+                                    downloads.showSuccessToast("Playlist déjà téléchargée.")
+                                } else {
+                                    pending.forEach(downloads.download)
+                                    downloads.showSuccessToast("Téléchargement de la playlist lancé (\(pending.count) titre\(pending.count > 1 ? "s" : ""))")
+                                }
+                            }
                             Button("Renommer", systemImage: "pencil") { name = playlist.name; showRename = true }
                             Button("Supprimer la playlist", systemImage: "trash", role: .destructive) { showDelete = true }
                         } label: { Image(systemName: "ellipsis") }
@@ -143,6 +185,7 @@ struct TrackCollectionView: View {
 struct LibraryView: View {
     @EnvironmentObject private var library: LibraryStore
     @EnvironmentObject private var session: SessionStore
+    @EnvironmentObject private var downloads: DownloadManager
     let importFiles: () -> Void
     @State private var newPlaylist = false
     @State private var playlistName = ""
@@ -188,6 +231,20 @@ struct LibraryView: View {
                                     Text("\(playlist.trackIDs.count) titres").font(.caption).foregroundStyle(NW.muted)
                                 }
                             }.buttonStyle(PressStyle())
+                            .contextMenu {
+                                Button {
+                                    let pTracks = library.playlistTracks(playlist)
+                                    let pending = pTracks.filter { $0.canDownload && library.localURL($0) == nil }
+                                    if pending.isEmpty {
+                                        downloads.showSuccessToast("Playlist déjà téléchargée.")
+                                    } else {
+                                        pending.forEach(downloads.download)
+                                        downloads.showSuccessToast("Téléchargement de « \(playlist.name) » lancé (\(pending.count) titre\(pending.count > 1 ? "s" : ""))")
+                                    }
+                                } label: {
+                                    Label("Télécharger la playlist", systemImage: "arrow.down.circle")
+                                }
+                            }
                         }
                     }
                 }

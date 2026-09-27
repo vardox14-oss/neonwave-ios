@@ -40,6 +40,7 @@ struct PlayerView: View {
     var onClose: (() -> Void)? = nil
     @EnvironmentObject private var player: AudioPlayer
     @EnvironmentObject private var library: LibraryStore
+    @EnvironmentObject private var downloads: DownloadManager
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var mode: PlayerMode = .cover
@@ -97,7 +98,27 @@ struct PlayerView: View {
                         dismiss()
                     }
                 }
-        )
+        .overlay(alignment: .top) {
+            if let toast = downloads.toastMessage {
+                HStack(spacing: 10) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Color.green)
+                        .font(.system(size: 16, weight: .bold))
+                    Text(toast)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 12)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().stroke(Color.green.opacity(0.35), lineWidth: 1))
+                .shadow(color: .black.opacity(0.35), radius: 14, y: 5)
+                .padding(.top, 54)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .animation(.spring(response: 0.35, dampingFraction: 0.8), value: downloads.toastMessage)
+            }
+        }
         .ignoresSafeArea()
         .sheet(isPresented: $showQueue) { QueueView() }
         .confirmationDialog("Minuterie de sommeil", isPresented: $showTimer, titleVisibility: .visible) {
@@ -299,6 +320,20 @@ struct PlayerView: View {
                 Text(track.title).font(.system(size: 22, weight: .bold, design: .rounded)).tracking(-0.5).lineLimit(1)
                 Text(track.artist).font(.subheadline.weight(.medium)).foregroundStyle(.white.opacity(0.55)).lineLimit(1)
             }.frame(maxWidth: .infinity, alignment: .leading)
+            if let progress = downloads.progress[track.id] {
+                Button { downloads.cancel(track.id) } label: {
+                    ProgressView(value: progress).progressViewStyle(.circular).frame(width: 32)
+                }
+            } else if library.localURL(track) != nil {
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.system(size: 22))
+                    .foregroundStyle(NW.blue)
+            } else if track.canDownload {
+                glassIcon("arrow.down.circle", label: "Télécharger") {
+                    downloads.download(track)
+                }
+                .foregroundStyle(NW.blue)
+            }
             glassIcon(library.snapshot.likedIDs.contains(track.id) ? "heart.fill" : "heart", label: "Favori") { library.toggleLike(track) }
                 .foregroundStyle(library.snapshot.likedIDs.contains(track.id) ? Color.pink : .white)
         }.frame(maxWidth: .infinity)
