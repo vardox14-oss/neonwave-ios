@@ -98,6 +98,7 @@ struct PlayerView: View {
                         dismiss()
                     }
                 }
+        )
         .overlay(alignment: .top) {
             if let toast = downloads.toastMessage {
                 HStack(spacing: 10) {
