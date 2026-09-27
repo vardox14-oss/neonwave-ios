@@ -119,6 +119,121 @@ import UniformTypeIdentifiers
         haptic()
     }
 
+    struct DraftAudioImport: Identifiable {
+        let id = UUID()
+        let url: URL
+        var title: String
+        var artist: String
+        var album: String
+        var duration: Double
+        var coverImage: UIImage?
+    }
+
+    static func prepareDraft(from url: URL) async -> DraftAudioImport {
+        let access = url.startAccessingSecurityScopedResource()
+        defer { if access { url.stopAccessingSecurityScopedResource() } }
+
+        var title = url.deletingPathExtension().lastPathComponent
+        var artist = ""
+        var album = ""
+        var duration: Double = 0
+        var coverImage: UIImage? = nil
+
+        let asset = AVURLAsset(url: url)
+        if let d = try? await asset.load(.duration).seconds, d.isFinite {
+            duration = d
+        }
+        if let metadata = try? await asset.load(.commonMetadata) {
+            for item in metadata {
+                switch item.commonKey {
+                case .commonKeyTitle:
+                    if let text = try? await item.load(.stringValue), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        title = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
+                case .commonKeyArtist:
+                    if let text = try? await item.load(.stringValue), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        artist = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
+                case .commonKeyAlbumName:
+                    if let text = try? await item.load(.stringValue), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        album = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
+                case .commonKeyArtwork:
+                    if let data = try? await item.load(.dataValue), let img = UIImage(data: data) {
+                        coverImage = img
+                    }
+                default: break
+                }
+            }
+        }
+        return DraftAudioImport(url: url, title: title, artist: artist, album: album, duration: duration, coverImage: coverImage)
+    }
+
+    func importCustomTrack(draft: DraftAudioImport, to playlist: Playlist? = nil) {
+        let access = draft.url.startAccessingSecurityScopedResource()
+        defer { if access { draft.url.stopAccessingSecurityScopedResource() } }
+        let id = UUID().uuidString
+        let ext = draft.url.pathExtension.lowercased()
+        let fileName = "\(id).\(ext)"
+        guard let destination = fileURL(fileName) else { return }
+        do {
+            try FileManager.default.copyItem(at: draft.url, to: destination)
+            try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: destination.path)
+
+            var artworkFile: String?
+            if let cover = draft.coverImage, let jpeg = cover.jpegData(compressionQuality: 0.86), let imgURL = fileURL("\(id)-cover.jpg") {
+                try jpeg.write(to: imgURL, options: [.atomic])
+                artworkFile = "\(id)-cover.jpg"
+            }
+
+            let cleanTitle = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let cleanArtist = draft.artist.trimmingCharacters(in: .whitespacesAndNewlines)
+            let cleanAlbum = draft.album.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            let track = Track(
+                id: id,
+                title: cleanTitle.isEmpty ? draft.url.deletingPathExtension().lastPathComponent : cleanTitle,
+                artist: cleanArtist.isEmpty ? "Fichiers personnels" : cleanArtist,
+                duration: draft.duration.isFinite ? draft.duration : 0,
+                fileName: fileName,
+                artworkFile: artworkFile,
+                album: cleanAlbum.isEmpty ? nil : cleanAlbum
+            )
+            snapshot.tracks.insert(track, at: 0)
+            if let playlist, let pIndex = snapshot.playlists.firstIndex(where: { $0.id == playlist.id }) {
+                snapshot.playlists[pIndex].trackIDs.append(track.id)
+            }
+            persist()
+            haptic()
+            message = "« \(track.title) » a été ajouté à votre bibliothèque."
+        } catch {
+            try? FileManager.default.removeItem(at: destination)
+            message = "Erreur lors de l'import : \(error.localizedDescription)"
+        }
+    }
+
+    func updateTrackMetadata(trackID: String, title: String, artist: String, album: String?, coverImage: UIImage?) {
+        guard let index = snapshot.tracks.firstIndex(where: { $0.id == trackID }) else { return }
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanArtist = artist.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanAlbum = album?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !cleanTitle.isEmpty { snapshot.tracks[index].title = cleanTitle }
+        if !cleanArtist.isEmpty { snapshot.tracks[index].artist = cleanArtist }
+        snapshot.tracks[index].album = (cleanAlbum?.isEmpty == false) ? cleanAlbum : nil
+
+        if let coverImage, let jpeg = coverImage.jpegData(compressionQuality: 0.86) {
+            let coverName = "\(trackID)-cover.jpg"
+            if let dest = fileURL(coverName) {
+                try? jpeg.write(to: dest, options: [.atomic])
+                snapshot.tracks[index].artworkFile = coverName
+            }
+        }
+        persist()
+        haptic()
+        message = "« \(snapshot.tracks[index].title) » mis à jour !"
+    }
+
     func importFiles(_ urls: [URL]) async {
         guard !importing else { return }
         importing = true

@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 enum MusicCatalogService {
     private struct ServerSearchResponse: Decodable {
@@ -836,6 +837,43 @@ enum MusicCatalogService {
             totalTracks: response.totalTracks ?? tracks.count,
             tracks: tracks
         )
+    }
+
+    // ─── Auto-fetch Cover Image for Custom Track ─────────────────────────────
+    static func findCoverImage(title: String, artist: String) async -> UIImage? {
+        let q = "\(artist) \(title)".trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty, let encoded = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return nil }
+
+        // 1. Try Deezer (high-res 500x500)
+        if let url = URL(string: "https://api.deezer.com/search?q=\(encoded)&limit=1") {
+            if let (data, resp) = try? await URLSession.shared.data(from: url),
+               (resp as? HTTPURLResponse)?.statusCode == 200,
+               let decoded = try? JSONDecoder().decode(DeezerSearchResponse.self, from: data),
+               let rawURL = decoded.data?.first?.album?.cover_big ?? decoded.data?.first?.album?.cover_medium,
+               let coverURL = URL(string: rawURL) {
+                if let (imgData, imgResp) = try? await URLSession.shared.data(from: coverURL),
+                   (imgResp as? HTTPURLResponse)?.statusCode == 200,
+                   let image = UIImage(data: imgData) {
+                    return image
+                }
+            }
+        }
+
+        // 2. Fallback to iTunes (600x600)
+        if let url = URL(string: "https://itunes.apple.com/search?term=\(encoded)&entity=song&limit=1") {
+            if let (data, resp) = try? await URLSession.shared.data(from: url),
+               (resp as? HTTPURLResponse)?.statusCode == 200,
+               let decoded = try? JSONDecoder().decode(ITunesResponse.self, from: data),
+               let raw = decoded.results?.first?.artworkUrl100?.replacingOccurrences(of: "100x100", with: "600x600"),
+               let coverURL = URL(string: raw) {
+                if let (imgData, imgResp) = try? await URLSession.shared.data(from: coverURL),
+                   (imgResp as? HTTPURLResponse)?.statusCode == 200,
+                   let image = UIImage(data: imgData) {
+                    return image
+                }
+            }
+        }
+        return nil
     }
 
 }

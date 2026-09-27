@@ -10,6 +10,7 @@ struct MainView: View {
     @EnvironmentObject private var network: NetworkMonitor
     @State private var tab: LibraryTab = .home
     @State private var showImport = false
+    @State private var pendingImportDraft: LibraryStore.DraftAudioImport? = nil
     @State private var showPlayer = false
     @State private var showSettings = false
 
@@ -72,9 +73,24 @@ struct MainView: View {
             }
             .fileImporter(isPresented: $showImport, allowedContentTypes: [.audio], allowsMultipleSelection: true) { result in
                 switch result {
-                case .success(let urls): Task { await library.importFiles(urls) }
+                case .success(let urls):
+                    guard !urls.isEmpty else { return }
+                    if urls.count == 1 {
+                        let url = urls[0]
+                        Task {
+                            let draft = await LibraryStore.prepareDraft(from: url)
+                            await MainActor.run {
+                                pendingImportDraft = draft
+                            }
+                        }
+                    } else {
+                        Task { await library.importFiles(urls) }
+                    }
                 case .failure(let error): library.message = error.localizedDescription
                 }
+            }
+            .sheet(item: $pendingImportDraft) { draft in
+                CustomImportSheet(draft: draft)
             }
             .overlay(alignment: .top) {
                 VStack(spacing: 8) {

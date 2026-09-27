@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 
 struct TrackRow: View {
     @EnvironmentObject private var session: SessionStore
@@ -10,6 +11,7 @@ struct TrackRow: View {
     var context: [Track] = []
     var playlist: Playlist? = nil
     @State private var confirmDelete = false
+    @State private var showEditTrack = false
     var body: some View {
         HStack(spacing: 12) {
             Button {
@@ -54,6 +56,9 @@ struct TrackRow: View {
                         if player.current?.id == track.id { player.stop() }; library.removeDownload(track)
                     }
                 }
+                Button("Modifier le titre et la pochette", systemImage: "pencil") {
+                    showEditTrack = true
+                }
                 Button("Supprimer de cet iPhone", systemImage: "trash", role: .destructive) { confirmDelete = true }
             } label: { Image(systemName: "ellipsis").font(.body.bold()).foregroundStyle(NW.muted).frame(width: 36, height: 48) }.accessibilityLabel("Options de \(track.title)")
         }.padding(.horizontal, 9).padding(.vertical, 7)
@@ -64,6 +69,9 @@ struct TrackRow: View {
                     downloads.cancel(track.id); if player.current?.id == track.id { player.stop() }; library.deleteTrack(track)
                 }
             } message: { Text("Le fichier sera retiré de cet iPhone et de vos playlists locales. Conservez une copie de votre fichier original.") }
+            .sheet(isPresented: $showEditTrack) {
+                TrackEditSheet(track: track)
+            }
     }
 }
 
@@ -1396,5 +1404,557 @@ struct ArtistDetailView: View {
             return String(format: "%.0f k", Double(n) / 1_000)
         }
         return "\(n)"
+    }
+}
+
+// ─── Custom Track Import Sheet ───────────────────────────────────────────────
+
+struct CustomImportSheet: View {
+    @EnvironmentObject private var library: LibraryStore
+    @Environment(\.dismiss) private var dismiss
+    let draft: LibraryStore.DraftAudioImport
+
+    @State private var title: String
+    @State private var artist: String
+    @State private var album: String
+    @State private var coverImage: UIImage?
+    @State private var selectedPhotoItem: PhotosPickerItem? = nil
+    @State private var searchingCover = false
+    @State private var selectedPlaylistID: String? = nil
+    @State private var searchError: String? = nil
+
+    init(draft: LibraryStore.DraftAudioImport) {
+        self.draft = draft
+        _title = State(initialValue: draft.title)
+        _artist = State(initialValue: draft.artist)
+        _album = State(initialValue: draft.album)
+        _coverImage = State(initialValue: draft.coverImage)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                NW.background.ignoresSafeArea()
+
+                ScrollView {
+                    VStack(spacing: 22) {
+                        // File badge
+                        HStack(spacing: 8) {
+                            Image(systemName: "waveform")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundStyle(NW.cyan)
+                            Text(draft.url.lastPathComponent)
+                                .font(.caption.bold())
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+                            if draft.duration > 0 {
+                                Text("· \(draft.duration.clockTime)")
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(NW.muted)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(NW.surface, in: Capsule())
+                        .overlay(Capsule().stroke(NW.cyan.opacity(0.3), lineWidth: 1))
+
+                        // Cover Artwork Preview
+                        VStack(spacing: 14) {
+                            ZStack {
+                                if let cover = coverImage {
+                                    Image(uiImage: cover)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 170, height: 170)
+                                        .clipped()
+                                } else {
+                                    ZStack {
+                                        LinearGradient(
+                                            colors: [NW.cyan.opacity(0.7), NW.blue.opacity(0.5), NW.violet.opacity(0.8)],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                        VStack(spacing: 8) {
+                                            Image(systemName: "music.note")
+                                                .font(.system(size: 44, weight: .bold))
+                                                .foregroundStyle(.white.opacity(0.85))
+                                            Text("AUCUNE POCHETTE")
+                                                .font(.system(size: 9, weight: .bold))
+                                                .tracking(1.4)
+                                                .foregroundStyle(.white.opacity(0.6))
+                                        }
+                                    }
+                                    .frame(width: 170, height: 170)
+                                }
+                            }
+                            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(Color.white.opacity(0.15), lineWidth: 1))
+                            .shadow(color: .black.opacity(0.4), radius: 20, y: 10)
+
+                            // Buttons for Cover
+                            HStack(spacing: 12) {
+                                PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "photo.on.rectangle.angled")
+                                            .font(.caption.bold())
+                                        Text("Photos")
+                                            .font(.caption.bold())
+                                    }
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 9)
+                                    .background(NW.surface, in: Capsule())
+                                    .foregroundStyle(.white)
+                                    .overlay(Capsule().stroke(Color.white.opacity(0.12)))
+                                }
+
+                                Button {
+                                    Task { await autoSearchCover() }
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        if searchingCover {
+                                            ProgressView().tint(NW.cyan)
+                                        } else {
+                                            Image(systemName: "sparkle.magnifyingglass")
+                                                .font(.caption.bold())
+                                        }
+                                        Text("Pochette web")
+                                            .font(.caption.bold())
+                                    }
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 9)
+                                    .background(NW.cyan.opacity(0.15), in: Capsule())
+                                    .foregroundStyle(NW.cyan)
+                                    .overlay(Capsule().stroke(NW.cyan.opacity(0.35)))
+                                }
+                                .disabled(searchingCover || (title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && artist.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+
+                                if coverImage != nil {
+                                    Button {
+                                        coverImage = nil
+                                    } label: {
+                                        Image(systemName: "trash")
+                                            .font(.caption.bold())
+                                            .foregroundStyle(Color.red.opacity(0.8))
+                                            .padding(9)
+                                            .background(Color.red.opacity(0.12), in: Circle())
+                                    }
+                                }
+                            }
+
+                            if let err = searchError {
+                                Text(err)
+                                    .font(.caption2)
+                                    .foregroundStyle(Color.orange)
+                            }
+                        }
+
+                        // Metadata Inputs
+                        VStack(spacing: 16) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("TITRE DU MORCEAU")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundStyle(NW.cyan)
+                                    .tracking(1.3)
+                                TextField("Titre", text: $title)
+                                    .font(.subheadline.bold())
+                                    .foregroundStyle(.white)
+                                    .padding(14)
+                                    .background(NW.surface, in: RoundedRectangle(cornerRadius: 14))
+                                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.08)))
+                            }
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("ARTISTE")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundStyle(NW.cyan)
+                                    .tracking(1.3)
+                                TextField("Nom de l'artiste", text: $artist)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.white)
+                                    .padding(14)
+                                    .background(NW.surface, in: RoundedRectangle(cornerRadius: 14))
+                                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.08)))
+                            }
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("ALBUM (OPTIONNEL)")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundStyle(NW.muted)
+                                    .tracking(1.3)
+                                TextField("Nom de l'album", text: $album)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.white)
+                                    .padding(14)
+                                    .background(NW.surface, in: RoundedRectangle(cornerRadius: 14))
+                                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.08)))
+                            }
+
+                            if !library.playlists.isEmpty {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("AJOUTER À UNE PLAYLIST (OPTIONNEL)")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundStyle(NW.muted)
+                                        .tracking(1.3)
+                                    Menu {
+                                        Button("Aucune (Bibliothèque uniquement)") {
+                                            selectedPlaylistID = nil
+                                        }
+                                        ForEach(library.playlists) { p in
+                                            Button(p.name) {
+                                                selectedPlaylistID = p.id
+                                            }
+                                        }
+                                    } label: {
+                                        HStack {
+                                            let currentName = library.playlists.first(where: { $0.id == selectedPlaylistID })?.name ?? "Aucune (Bibliothèque uniquement)"
+                                            Text(currentName)
+                                                .font(.subheadline)
+                                                .foregroundStyle(.white)
+                                            Spacer()
+                                            Image(systemName: "chevron.up.chevron.down")
+                                                .font(.caption)
+                                                .foregroundStyle(NW.muted)
+                                        }
+                                        .padding(14)
+                                        .background(NW.surface, in: RoundedRectangle(cornerRadius: 14))
+                                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.08)))
+                                    }
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 20)
+
+                        // Save Button
+                        Button {
+                            doSave()
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "square.and.arrow.down.fill")
+                                Text("Ajouter à la bibliothèque")
+                            }
+                            .font(.headline.bold())
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(
+                                LinearGradient(colors: [NW.cyan, NW.blue], startPoint: .leading, endPoint: .trailing),
+                                in: RoundedRectangle(cornerRadius: 16)
+                            )
+                            .shadow(color: NW.blue.opacity(0.3), radius: 12, y: 6)
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.top, 10)
+                        .padding(.bottom, 40)
+                    }
+                    .padding(.top, 16)
+                }
+            }
+            .navigationTitle("Personnaliser le morceau")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Annuler") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Importer") { doSave() }
+                        .font(.headline)
+                        .foregroundStyle(NW.cyan)
+                }
+            }
+            .onChange(of: selectedPhotoItem) { _, newItem in
+                Task {
+                    if let data = try? await newItem?.loadTransferable(type: Data.self),
+                       let image = UIImage(data: data) {
+                        await MainActor.run {
+                            coverImage = image
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func autoSearchCover() async {
+        searchingCover = true
+        searchError = nil
+        if let found = await MusicCatalogService.findCoverImage(title: title, artist: artist) {
+            coverImage = found
+        } else {
+            searchError = "Aucune pochette trouvée sur le web."
+        }
+        searchingCover = false
+    }
+
+    private func doSave() {
+        var updatedDraft = draft
+        updatedDraft.title = title
+        updatedDraft.artist = artist
+        updatedDraft.album = album
+        updatedDraft.coverImage = coverImage
+
+        let targetPlaylist = library.playlists.first(where: { $0.id == selectedPlaylistID })
+        library.importCustomTrack(draft: updatedDraft, to: targetPlaylist)
+        dismiss()
+    }
+}
+
+// ─── Track Edit Sheet (Modifier les informations d'un morceau) ───────────────
+
+struct TrackEditSheet: View {
+    @EnvironmentObject private var library: LibraryStore
+    @EnvironmentObject private var player: AudioPlayer
+    @Environment(\.dismiss) private var dismiss
+    let track: Track
+
+    @State private var title: String
+    @State private var artist: String
+    @State private var album: String
+    @State private var coverImage: UIImage?
+    @State private var selectedPhotoItem: PhotosPickerItem? = nil
+    @State private var searchingCover = false
+    @State private var searchError: String? = nil
+
+    init(track: Track) {
+        self.track = track
+        _title = State(initialValue: track.title)
+        _artist = State(initialValue: track.artist)
+        _album = State(initialValue: track.album ?? "")
+        _coverImage = State(initialValue: nil)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                NW.background.ignoresSafeArea()
+
+                ScrollView {
+                    VStack(spacing: 22) {
+                        // Cover Artwork Preview
+                        VStack(spacing: 14) {
+                            ZStack {
+                                if let cover = coverImage {
+                                    Image(uiImage: cover)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 170, height: 170)
+                                        .clipped()
+                                } else if let local = library.artworkURL(track), let img = UIImage(contentsOfFile: local.path) {
+                                    Image(uiImage: img)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 170, height: 170)
+                                        .clipped()
+                                } else if let remote = track.artworkURL, let url = URL(string: remote) {
+                                    AsyncImage(url: url) { phase in
+                                        if case .success(let img) = phase {
+                                            img.resizable().scaledToFill()
+                                        } else {
+                                            placeholderCover
+                                        }
+                                    }
+                                    .frame(width: 170, height: 170)
+                                    .clipped()
+                                } else {
+                                    placeholderCover
+                                }
+                            }
+                            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(Color.white.opacity(0.15), lineWidth: 1))
+                            .shadow(color: .black.opacity(0.4), radius: 20, y: 10)
+
+                            // Buttons for Cover
+                            HStack(spacing: 12) {
+                                PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "photo.on.rectangle.angled")
+                                            .font(.caption.bold())
+                                        Text("Photos")
+                                            .font(.caption.bold())
+                                    }
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 9)
+                                    .background(NW.surface, in: Capsule())
+                                    .foregroundStyle(.white)
+                                    .overlay(Capsule().stroke(Color.white.opacity(0.12)))
+                                }
+
+                                Button {
+                                    Task { await autoSearchCover() }
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        if searchingCover {
+                                            ProgressView().tint(NW.cyan)
+                                        } else {
+                                            Image(systemName: "sparkle.magnifyingglass")
+                                                .font(.caption.bold())
+                                        }
+                                        Text("Pochette web")
+                                            .font(.caption.bold())
+                                    }
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 9)
+                                    .background(NW.cyan.opacity(0.15), in: Capsule())
+                                    .foregroundStyle(NW.cyan)
+                                    .overlay(Capsule().stroke(NW.cyan.opacity(0.35)))
+                                }
+                                .disabled(searchingCover || (title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && artist.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+
+                                if coverImage != nil {
+                                    Button {
+                                        coverImage = nil
+                                    } label: {
+                                        Image(systemName: "arrow.counterclockwise")
+                                            .font(.caption.bold())
+                                            .foregroundStyle(NW.muted)
+                                            .padding(9)
+                                            .background(NW.surface, in: Circle())
+                                    }
+                                }
+                            }
+
+                            if let err = searchError {
+                                Text(err)
+                                    .font(.caption2)
+                                    .foregroundStyle(Color.orange)
+                            }
+                        }
+
+                        // Metadata Inputs
+                        VStack(spacing: 16) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("TITRE DU MORCEAU")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundStyle(NW.cyan)
+                                    .tracking(1.3)
+                                TextField("Titre", text: $title)
+                                    .font(.subheadline.bold())
+                                    .foregroundStyle(.white)
+                                    .padding(14)
+                                    .background(NW.surface, in: RoundedRectangle(cornerRadius: 14))
+                                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.08)))
+                            }
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("ARTISTE")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundStyle(NW.cyan)
+                                    .tracking(1.3)
+                                TextField("Nom de l'artiste", text: $artist)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.white)
+                                    .padding(14)
+                                    .background(NW.surface, in: RoundedRectangle(cornerRadius: 14))
+                                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.08)))
+                            }
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("ALBUM")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundStyle(NW.muted)
+                                    .tracking(1.3)
+                                TextField("Nom de l'album", text: $album)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.white)
+                                    .padding(14)
+                                    .background(NW.surface, in: RoundedRectangle(cornerRadius: 14))
+                                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.08)))
+                            }
+                        }
+                        .padding(.horizontal, 20)
+
+                        // Save Button
+                        Button {
+                            doSave()
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "checkmark")
+                                Text("Enregistrer les modifications")
+                            }
+                            .font(.headline.bold())
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(
+                                LinearGradient(colors: [NW.cyan, NW.blue], startPoint: .leading, endPoint: .trailing),
+                                in: RoundedRectangle(cornerRadius: 16)
+                            )
+                            .shadow(color: NW.blue.opacity(0.3), radius: 12, y: 6)
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.top, 10)
+                        .padding(.bottom, 40)
+                    }
+                    .padding(.top, 16)
+                }
+            }
+            .navigationTitle("Modifier le morceau")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Annuler") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Enregistrer") { doSave() }
+                        .font(.headline)
+                        .foregroundStyle(NW.cyan)
+                }
+            }
+            .onChange(of: selectedPhotoItem) { _, newItem in
+                Task {
+                    if let data = try? await newItem?.loadTransferable(type: Data.self),
+                       let image = UIImage(data: data) {
+                        await MainActor.run {
+                            coverImage = image
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var placeholderCover: some View {
+        ZStack {
+            LinearGradient(
+                colors: [NW.cyan.opacity(0.7), NW.blue.opacity(0.5), NW.violet.opacity(0.8)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            Image(systemName: "music.note")
+                .font(.system(size: 44, weight: .bold))
+                .foregroundStyle(.white.opacity(0.85))
+        }
+        .frame(width: 170, height: 170)
+    }
+
+    private func autoSearchCover() async {
+        searchingCover = true
+        searchError = nil
+        if let found = await MusicCatalogService.findCoverImage(title: title, artist: artist) {
+            coverImage = found
+        } else {
+            searchError = "Aucune pochette trouvée sur le web."
+        }
+        searchingCover = false
+    }
+
+    private func doSave() {
+        library.updateTrackMetadata(
+            trackID: track.id,
+            title: title,
+            artist: artist,
+            album: album,
+            coverImage: coverImage
+        )
+        if player.current?.id == track.id {
+            if !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                player.current?.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            if !artist.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                player.current?.artist = artist.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            player.current?.album = album.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : album.trimmingCharacters(in: .whitespacesAndNewlines)
+            player.updateNowPlaying(includeArtwork: true)
+        }
+        dismiss()
     }
 }

@@ -24,6 +24,8 @@
     <key>NeonWaveSupportURL</key><string>$(NEONWAVE_SUPPORT_URL)</string>
     <key>NSAppleMusicUsageDescription</key>
     <string>NeonWave utilise l’accès multimédia pour diffuser votre musique.</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>NeonWave utilise vos photos pour personnaliser la pochette de vos morceaux.</string>
     <key>NSAppTransportSecurity</key>
     <dict>
         <key>NSAllowsArbitraryLoadsInWebContent</key>
