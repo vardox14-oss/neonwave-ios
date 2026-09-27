@@ -30,18 +30,10 @@ struct Track: Identifiable, Codable, Hashable {
     }
     var colorIndex: Int { id.utf8.reduce(0) { ($0 + Int($1)) % 6 } }
     var canDownload: Bool {
-#if APPSTORE
-        remoteID != nil
-#else
-        remoteID != nil || streamURL != nil || videoId != nil || spotifyId != nil
-#endif
+        remoteID != nil || streamURL != nil || videoId != nil || spotifyId != nil || !title.isEmpty
     }
     var isDownloadedSource: Bool {
-#if APPSTORE
-        remoteID != nil
-#else
-        remoteID != nil || streamURL != nil || videoId != nil || spotifyId != nil
-#endif
+        remoteID != nil || streamURL != nil || videoId != nil || spotifyId != nil || !title.isEmpty
     }
 }
 

@@ -84,9 +84,6 @@ final class DownloadManager: NSObject, ObservableObject, URLSessionDownloadDeleg
             return (request, sourceExtension(track.streamURL) ?? "mp3", nil)
         }
 
-#if APPSTORE
-        throw MessageError("Apple Music protège ses fichiers. Pour une écoute hors connexion, utilisez le téléchargement Apple Music ou importez un fichier audio qui vous appartient dans NeonWave.")
-#else
         let videoID: String?
         if let existing = track.videoId, !existing.isEmpty {
             videoID = existing
@@ -109,7 +106,6 @@ final class DownloadManager: NSObject, ObservableObject, URLSessionDownloadDeleg
             return (request, sourceExtension(stream) ?? "mp3", videoID)
         }
         throw MessageError("Ce titre n’est pas encore disponible au téléchargement. Réessayez dans quelques secondes.")
-#endif
     }
     private func directRequest(_ source: String, allowsCellular: Bool) throws -> URLRequest? {
         let request: URLRequest

@@ -220,15 +220,11 @@ private final class SilentAudioKeepAlive {
 
     func isPlayable(_ track: Track) -> Bool {
         if library?.localURL(track) != nil { return true }
-#if APPSTORE
-        return track.appleMusicID != nil
-#else
         if track.appleMusicID != nil { return true }
         if track.videoId != nil { return true }
         if track.streamURL != nil { return true }
         if !track.title.isEmpty { return true }
         return false
-#endif
     }
 
     func playableURL(for track: Track) -> URL? {
@@ -291,12 +287,6 @@ private final class SilentAudioKeepAlive {
             return
         }
 
-#if APPSTORE
-        isBuffering = false
-        loadingLyrics = false
-        error = "Ce titre n’est pas disponible via Apple Music. Importez votre propre fichier audio pour l’écouter hors connexion."
-        return
-#else
         // 2. Online track: resolve the complete song, then play it natively.
         // Native AVPlayer keeps playing with the screen locked and exposes the
         // real iOS lock-screen controls.
@@ -335,7 +325,6 @@ private final class SilentAudioKeepAlive {
                 }
             }
         }
-#endif
     }
 
     private func startAppleMusicPlayback(_ target: Track) {
