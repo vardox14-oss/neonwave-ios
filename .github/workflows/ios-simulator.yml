@@ -98,7 +98,7 @@ jobs:
             ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM=CI0000000 \
-            NEONWAVE_API_URL=https://easier-turbo-referred-component.trycloudflare.com \
+            NEONWAVE_API_URL=https://51.77.159.172.sslip.io \
             NEONWAVE_PRIVACY_URL=https://neonwave.app/privacy \
             NEONWAVE_SUPPORT_URL=https://neonwave.app/support \
             build 2>&1 | tee ios/build/xcodebuild-device.log

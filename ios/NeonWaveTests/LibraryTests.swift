@@ -2,6 +2,22 @@ import XCTest
 @testable import NeonWave
 
 final class LibraryTests: XCTestCase {
+    func testDeviceAudioSelectsNativeAACAndRejectsWrongVideo() throws {
+        let data = Data(#"{"playabilityStatus":{"status":"OK"},"videoDetails":{"videoId":"9Et9XGVMmUw"},"streamingData":{"adaptiveFormats":[{"itag":251,"mimeType":"audio/webm","url":"https://r1.googlevideo.com/opus"},{"itag":140,"mimeType":"audio/mp4; codecs=\"mp4a.40.2\"","url":"https://r1.googlevideo.com/aac"}]}}"#.utf8)
+        XCTAssertEqual(MusicCatalogService.selectDeviceAudioURL(data, videoId: "9Et9XGVMmUw")?.path, "/aac")
+        XCTAssertNil(MusicCatalogService.selectDeviceAudioURL(data, videoId: "6O8kvPpiQy8"))
+    }
+
+    func testDeviceAudioRejectsBlockedAndUntrustedStreams() throws {
+        for (status, url) in [("LOGIN_REQUIRED", "https://r1.googlevideo.com/aac"), ("OK", "https://googlevideo.com.attacker.example/aac"), ("OK", "http://r1.googlevideo.com/aac")] {
+            let data = try JSONSerialization.data(withJSONObject: [
+                "playabilityStatus": ["status": status], "videoDetails": ["videoId": "9Et9XGVMmUw"],
+                "streamingData": ["adaptiveFormats": [["itag": 140, "mimeType": "audio/mp4", "url": url]]]
+            ])
+            XCTAssertNil(MusicCatalogService.selectDeviceAudioURL(data, videoId: "9Et9XGVMmUw"))
+        }
+    }
+
     @MainActor func testPlaylistsKeepTheirOrderAndAvoidDuplicates() throws {
         let store = LibraryStore()
         store.activate("test-\(UUID().uuidString)")

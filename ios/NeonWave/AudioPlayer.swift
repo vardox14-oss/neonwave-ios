@@ -390,9 +390,8 @@ private final class SilentAudioKeepAlive {
             }
         }
 
-        if let existingVid = target.videoId, !existingVid.isEmpty, target.duration > 0, target.spotifyId != nil {
-            startNativeOnlinePlayback(videoId: existingVid, trackID: target.id)
-        } else {
+        // Re-resolve stored IDs so old incorrect matches do not survive an update.
+        do {
             resolveTask = Task { [weak self] in
                 guard let self else { return }
                 let media = await MusicCatalogService.resolveTrackMedia(title: target.title, artist: target.artist, duration: target.duration, spotifyId: target.spotifyId)

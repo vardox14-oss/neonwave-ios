@@ -104,19 +104,19 @@ final class DownloadManager: NSObject, ObservableObject, URLSessionDownloadDeleg
             return (request, sourceExtension(track.streamURL) ?? "mp3", nil)
         }
 
-        let videoID: String?
-        if let existing = track.videoId, !existing.isEmpty {
-            videoID = existing
-        } else {
-            videoID = await MusicCatalogService.resolveYouTubeId(
+        let videoID = await MusicCatalogService.resolveYouTubeId(
                 title: track.title,
                 artist: track.artist,
                 duration: track.duration,
                 spotifyId: track.spotifyId
-            )
-        }
+            ) ?? track.videoId
         if let videoID, let url = await MusicCatalogService.nativeStreamURL(videoId: videoID) {
             var request = URLRequest(url: url)
+            if url.host?.hasSuffix(".googlevideo.com") == true,
+               let rawLength = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "clen" })?.value,
+               let length = Int64(rawLength), length > 0 {
+                request.setValue("bytes=0-\(length - 1)", forHTTPHeaderField: "Range")
+            }
             request.timeoutInterval = 60
             request.allowsCellularAccess = !library.snapshot.wifiOnly
             return (request, "m4a", videoID)
@@ -268,4 +268,3 @@ final class NetworkMonitor: NSObject, ObservableObject {
         monitor.start(queue: queue)
     }
 }
-
