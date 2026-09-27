@@ -97,7 +97,10 @@ jobs:
             -derivedDataPath ios/DerivedData-Device \
             ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM=CI0000000 \
             NEONWAVE_API_URL=https://fifty-singers-tan.loca.lt \
+            NEONWAVE_PRIVACY_URL=https://neonwave.app/privacy \
+            NEONWAVE_SUPPORT_URL=https://neonwave.app/support \
             build 2>&1 | tee ios/build/xcodebuild-device.log
 
           DEVICE_APP=ios/DerivedData-Device/Build/Products/Release-iphoneos/NeonWave.app
