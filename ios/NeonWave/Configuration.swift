@@ -11,11 +11,7 @@ enum AppConfiguration {
            !host.hasSuffix(".example"), !value.contains("$(") {
             return url
         }
-        #if DEBUG
         return URL(string: "https://fifty-singers-tan.loca.lt")
-        #else
-        return nil
-        #endif
     }
     static func publicURL(_ key: String) -> URL? {
         guard let value = Bundle.main.object(forInfoDictionaryKey: key) as? String,
