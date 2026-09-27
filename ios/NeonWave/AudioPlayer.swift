@@ -96,6 +96,7 @@ private final class SilentAudioKeepAlive {
     private var lyricsTask: Task<Void, Never>?
     private var lyricsFallbackTask: Task<Void, Never>?
     private var lyricsRequestedDuration: Double = 0
+    private var spotifyDuration: Double = 0   // durée Spotify originale (référence)
     private var index = 0
     private weak var library: LibraryStore?
     private var resumeAfterInterruption = false
@@ -109,19 +110,32 @@ private final class SilentAudioKeepAlive {
             Task { @MainActor in
                 guard let self, !self.isYouTubeActive else { return }
                 self.elapsed = time.seconds.isFinite ? time.seconds : 0
+
+                // ── Durée affichée ──────────────────────────────────────────
+                // On préfère la durée Spotify (spotifyDuration) si elle est connue.
+                // La durée du fichier YouTube peut contenir du silence après la chanson.
                 let length = self.player.currentItem?.duration.seconds ?? 0
                 if length.isFinite && length > 0 {
-                    if self.duration <= 0 || abs(self.duration - length) > 1 {
-                        self.duration = length
+                    let displayDuration = self.spotifyDuration > 0 ? self.spotifyDuration : length
+                    if self.duration <= 0 || abs(self.duration - displayDuration) > 1 {
+                        self.duration = displayDuration
                         if self.queue.indices.contains(self.index) {
-                            self.queue[self.index].duration = length
+                            self.queue[self.index].duration = displayDuration
                             self.current = self.queue[self.index]
                         }
                     }
-                    if self.lyricsRequestedDuration == 0 || abs(self.lyricsRequestedDuration - length) > 2 {
-                        self.fetchLyricsForCurrent(preferredDuration: length)
+                    if self.lyricsRequestedDuration == 0 || abs(self.lyricsRequestedDuration - displayDuration) > 2 {
+                        self.fetchLyricsForCurrent(preferredDuration: displayDuration)
                     }
                 }
+
+                // ── Auto-avance si la chanson est terminée mais le stream continue ──
+                // (ex: vidéo YouTube de 4min pour une chanson de 2min05)
+                if self.spotifyDuration > 0 && self.isPlaying && self.elapsed > self.spotifyDuration + 2.0 {
+                    self.next(automatic: true)
+                    return
+                }
+
                 self.updateActiveLyric()
                 self.updateNowPlaying()
             }
@@ -304,6 +318,9 @@ private final class SilentAudioKeepAlive {
 
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [])
         try? AVAudioSession.sharedInstance().setActive(true)
+        // Mémoriser la durée Spotify AVANT de charger le stream YouTube
+        // (le stream peut être plus long que la chanson réelle)
+        spotifyDuration = target.duration > 10 ? target.duration : 0
         current = target; elapsed = 0; duration = target.duration; lyricsOffset = 0; lyricsRequestedDuration = 0
         lyricsTask?.cancel(); lyricsFallbackTask?.cancel(); lyrics = []; plainLyrics = nil; activeLyricIndex = nil; loadingLyrics = true
         updateNowPlaying(includeArtwork: true)
