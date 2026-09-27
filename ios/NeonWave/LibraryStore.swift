@@ -212,8 +212,9 @@ import UniformTypeIdentifiers
         }
     }
 
-    func updateTrackMetadata(trackID: String, title: String, artist: String, album: String?, coverImage: UIImage?) {
-        guard let index = snapshot.tracks.firstIndex(where: { $0.id == trackID }) else { return }
+    @discardableResult
+    func updateTrackMetadata(trackID: String, title: String, artist: String, album: String?, coverImage: UIImage?) -> Track? {
+        guard let index = snapshot.tracks.firstIndex(where: { $0.id == trackID }) else { return nil }
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanArtist = artist.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanAlbum = album?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -229,9 +230,11 @@ import UniformTypeIdentifiers
                 snapshot.tracks[index].artworkFile = coverName
             }
         }
+        let updated = snapshot.tracks[index]
         persist()
         haptic()
-        message = "« \(snapshot.tracks[index].title) » mis à jour !"
+        message = "« \(updated.title) » mis à jour !"
+        return updated
     }
 
     func importFiles(_ urls: [URL]) async {

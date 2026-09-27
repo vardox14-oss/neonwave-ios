@@ -274,6 +274,16 @@ private final class SilentAudioKeepAlive {
 
     func connect(_ library: LibraryStore) { self.library = library }
 
+    func refreshCurrentTrack(from updatedTrack: Track) {
+        if current?.id == updatedTrack.id {
+            current = updatedTrack
+            if queue.indices.contains(index), queue[index].id == updatedTrack.id {
+                queue[index] = updatedTrack
+            }
+            updateNowPlaying(includeArtwork: true)
+        }
+    }
+
     func isPlayable(_ track: Track) -> Bool {
         if library?.localURL(track) != nil { return true }
         if track.appleMusicID != nil { return true }

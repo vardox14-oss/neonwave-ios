@@ -1938,22 +1938,14 @@ struct TrackEditSheet: View {
     }
 
     private func doSave() {
-        library.updateTrackMetadata(
+        if let updated = library.updateTrackMetadata(
             trackID: track.id,
             title: title,
             artist: artist,
             album: album,
             coverImage: coverImage
-        )
-        if player.current?.id == track.id {
-            if !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                player.current?.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-            if !artist.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                player.current?.artist = artist.trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-            player.current?.album = album.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : album.trimmingCharacters(in: .whitespacesAndNewlines)
-            player.updateNowPlaying(includeArtwork: true)
+        ) {
+            player.refreshCurrentTrack(from: updated)
         }
         dismiss()
     }
