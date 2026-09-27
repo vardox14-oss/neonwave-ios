@@ -127,10 +127,16 @@ struct PlayerView: View {
             if player.sleepUntil != nil { Button("Désactiver la minuterie", role: .destructive) { player.setSleep(minutes: nil) } }
         }
         .onChange(of: player.current?.id) { _, value in if value == nil { dismiss() } }
-        .task(id: player.current?.id) {
+        .task(id: "\(player.current?.id ?? "")-\(player.current?.spotifyId ?? "")") {
             guard let track = player.current else {
                 canvasURL = nil
                 showArtworkOverlay = false
+                return
+            }
+            if let localCanvas = library.canvasURL(track) {
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.5)) {
+                    canvasURL = localCanvas
+                }
                 return
             }
             canvasURL = nil
@@ -166,20 +172,33 @@ struct PlayerView: View {
                         endPoint: .bottom
                     )
                 } else {
-                    AsyncImage(url: track.artworkURL.flatMap(URL.init(string:))) { image in
-                        image
+                    if let localArt = library.artworkURL(track), let image = UIImage(contentsOfFile: localArt.path) {
+                        Image(uiImage: image)
                             .resizable()
                             .scaledToFill()
                             .frame(width: size.width, height: size.height)
                             .clipped()
-                    } placeholder: {
-                        LinearGradient(colors: NW.colors[track.colorIndex], startPoint: .topLeading, endPoint: .bottomTrailing)
+                            .frame(width: size.width, height: size.height)
+                            .scaleEffect(1.4)
+                            .blur(radius: 72)
+                            .opacity(0.38)
+                            .clipped()
+                    } else {
+                        AsyncImage(url: track.artworkURL.flatMap(URL.init(string:))) { image in
+                            image
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: size.width, height: size.height)
+                                .clipped()
+                        } placeholder: {
+                            LinearGradient(colors: NW.colors[track.colorIndex], startPoint: .topLeading, endPoint: .bottomTrailing)
+                        }
+                        .frame(width: size.width, height: size.height)
+                        .scaleEffect(1.4)
+                        .blur(radius: 72)
+                        .opacity(0.38)
+                        .clipped()
                     }
-                    .frame(width: size.width, height: size.height)
-                    .scaleEffect(1.4)
-                    .blur(radius: 72)
-                    .opacity(0.38)
-                    .clipped()
 
                     LinearGradient(colors: [.black.opacity(0.12), NW.background.opacity(0.72), NW.background], startPoint: .top, endPoint: .bottom)
                     RadialGradient(colors: [NW.colors[track.colorIndex][0].opacity(0.19), .clear], center: .topTrailing, startRadius: 20, endRadius: 390)

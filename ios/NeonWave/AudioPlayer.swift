@@ -111,7 +111,13 @@ private final class SilentAudioKeepAlive {
                 self.elapsed = time.seconds.isFinite ? time.seconds : 0
                 let length = self.player.currentItem?.duration.seconds ?? 0
                 if length.isFinite && length > 0 {
-                    self.duration = length
+                    if self.duration <= 0 || abs(self.duration - length) > 1 {
+                        self.duration = length
+                        if self.queue.indices.contains(self.index) {
+                            self.queue[self.index].duration = length
+                            self.current = self.queue[self.index]
+                        }
+                    }
                     if self.lyricsRequestedDuration == 0 || abs(self.lyricsRequestedDuration - length) > 2 {
                         self.fetchLyricsForCurrent(preferredDuration: length)
                     }
@@ -173,7 +179,13 @@ private final class SilentAudioKeepAlive {
                 guard let self, self.isYouTubeActive else { return }
                 self.elapsed = cur
                 if dur > 0 {
-                    self.duration = dur
+                    if self.duration <= 0 || abs(self.duration - dur) > 1 {
+                        self.duration = dur
+                        if self.queue.indices.contains(self.index) {
+                            self.queue[self.index].duration = dur
+                            self.current = self.queue[self.index]
+                        }
+                    }
                     if self.lyricsRequestedDuration == 0 || abs(self.lyricsRequestedDuration - dur) > 2 {
                         self.fetchLyricsForCurrent(preferredDuration: dur)
                     }
@@ -270,8 +282,29 @@ private final class SilentAudioKeepAlive {
 #endif
 
             let item = AVPlayerItem(url: localURL)
-            statusObserver = item.observe(\.status, options: [.new]) { [weak self] item, _ in
-                if item.status == .failed { Task { @MainActor in self?.error = "Ce fichier audio ne peut pas être lu."; self?.pause() } }
+            statusObserver = item.observe(\.status, options: [.new, .initial]) { [weak self] item, _ in
+                Task { @MainActor in
+                    guard let self else { return }
+                    if item.status == .failed {
+                        self.error = "Ce fichier audio ne peut pas être lu."
+                        self.pause()
+                    } else if item.status == .readyToPlay {
+                        let itemDur = item.duration.seconds
+                        if itemDur.isFinite && itemDur > 0 {
+                            if self.duration <= 0 || abs(self.duration - itemDur) > 1 {
+                                self.duration = itemDur
+                                if self.queue.indices.contains(self.index) {
+                                    self.queue[self.index].duration = itemDur
+                                    self.current = self.queue[self.index]
+                                }
+                            }
+                            if self.lyricsRequestedDuration == 0 || abs(self.lyricsRequestedDuration - itemDur) > 2 {
+                                self.fetchLyricsForCurrent(preferredDuration: itemDur)
+                            }
+                            self.updateNowPlaying()
+                        }
+                    }
+                }
             }
             player.replaceCurrentItem(with: item)
             player.automaticallyWaitsToMinimizeStalling = true
@@ -303,19 +336,36 @@ private final class SilentAudioKeepAlive {
             }
         }
 
-        if let existingVid = target.videoId, !existingVid.isEmpty {
+        if let existingVid = target.videoId, !existingVid.isEmpty, target.duration > 0, target.spotifyId != nil {
             startNativeOnlinePlayback(videoId: existingVid, trackID: target.id)
         } else {
             resolveTask = Task { [weak self] in
                 guard let self else { return }
-                let vid = await MusicCatalogService.resolveYouTubeId(title: target.title, artist: target.artist, duration: target.duration, spotifyId: target.spotifyId)
+                let media = await MusicCatalogService.resolveTrackMedia(title: target.title, artist: target.artist, duration: target.duration, spotifyId: target.spotifyId)
                 Task { @MainActor in
                     guard self.current?.id == target.id else { return }
-                    if let vid {
+                    if let media {
                         if self.queue.indices.contains(self.index) {
-                            self.queue[self.index].videoId = vid
+                            self.queue[self.index].videoId = media.videoId
+                            if let dur = media.duration, dur > 0 {
+                                self.queue[self.index].duration = dur
+                                self.duration = dur
+                            }
+                            if let spId = media.spotifyId, !spId.isEmpty {
+                                self.queue[self.index].spotifyId = spId
+                            }
+                            if let thumb = media.thumbnail, !thumb.isEmpty, (self.queue[self.index].artworkURL == nil || self.queue[self.index].artworkURL?.isEmpty == true) {
+                                self.queue[self.index].artworkURL = thumb
+                            }
+                            self.current = self.queue[self.index]
                         }
-                        self.startNativeOnlinePlayback(videoId: vid, trackID: target.id)
+                        if self.duration > 0 && (self.lyricsRequestedDuration == 0 || abs(self.lyricsRequestedDuration - self.duration) > 2) {
+                            self.fetchLyricsForCurrent(preferredDuration: self.duration)
+                        }
+                        self.updateNowPlaying(includeArtwork: true)
+                        self.startNativeOnlinePlayback(videoId: media.videoId, trackID: target.id)
+                    } else if let existingVid = target.videoId, !existingVid.isEmpty {
+                        self.startNativeOnlinePlayback(videoId: existingVid, trackID: target.id)
                     } else if let stream = target.streamURL, let url = URL(string: stream) {
                         self.startAVPlayerFallback(url: url)
                     } else {
@@ -422,15 +472,31 @@ private final class SilentAudioKeepAlive {
         SilentAudioKeepAlive.shared.stop()
         YouTubePlayer.shared.stop()
         let item = AVPlayerItem(url: url)
-        statusObserver = item.observe(\.status, options: [.new]) { [weak self] item, _ in
-            guard item.status == .failed else { return }
+        statusObserver = item.observe(\.status, options: [.new, .initial]) { [weak self] item, _ in
             Task { @MainActor in
                 guard let self else { return }
-                if let fallbackVideoId {
-                    self.startYouTubePlayback(videoId: fallbackVideoId)
-                } else {
-                    self.error = "Ce flux audio ne peut pas être lu."
-                    self.pause()
+                if item.status == .failed {
+                    if let fallbackVideoId {
+                        self.startYouTubePlayback(videoId: fallbackVideoId)
+                    } else {
+                        self.error = "Ce flux audio ne peut pas être lu."
+                        self.pause()
+                    }
+                } else if item.status == .readyToPlay {
+                    let itemDur = item.duration.seconds
+                    if itemDur.isFinite && itemDur > 0 {
+                        if self.duration <= 0 || abs(self.duration - itemDur) > 1 {
+                            self.duration = itemDur
+                            if self.queue.indices.contains(self.index) {
+                                self.queue[self.index].duration = itemDur
+                                self.current = self.queue[self.index]
+                            }
+                        }
+                        if self.lyricsRequestedDuration == 0 || abs(self.lyricsRequestedDuration - itemDur) > 2 {
+                            self.fetchLyricsForCurrent(preferredDuration: itemDur)
+                        }
+                        self.updateNowPlaying()
+                    }
                 }
             }
         }

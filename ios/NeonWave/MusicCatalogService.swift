@@ -20,6 +20,19 @@ enum MusicCatalogService {
     private struct ResolveResponse: Decodable {
         let videoId: String
         let duration: Double?
+        let title: String?
+        let artist: String?
+        let spotifyId: String?
+        let thumbnail: String?
+    }
+
+    struct ResolvedMedia {
+        let videoId: String
+        let duration: Double?
+        let title: String?
+        let artist: String?
+        let spotifyId: String?
+        let thumbnail: String?
     }
 
     private struct StreamTicketResponse: Decodable {
@@ -95,6 +108,7 @@ enum MusicCatalogService {
         if AppConfiguration.apiURL != nil,
            let response: ServerSearchResponse = try? await APIClient().call(
                 "api/music/search",
+                authenticated: false,
                 queryItems: [URLQueryItem(name: "q", value: trimmed), URLQueryItem(name: "filter", value: "music")]
            ), !response.items.isEmpty {
             return response.items.map { item in
@@ -234,19 +248,48 @@ enum MusicCatalogService {
         return URL(string: response.path, relativeTo: baseURL)?.absoluteURL
     }
 
+    static func resolveTrackMedia(title: String, artist: String, duration: Double = 0, spotifyId: String? = nil) async -> ResolvedMedia? {
+        let key = "\(artist.lowercased())|\(title.lowercased())"
+
+        if AppConfiguration.apiURL != nil {
+            let path = (spotifyId != nil && spotifyId!.count == 22) ? "api/music/resolve/\(spotifyId!)" : "api/music/resolve-by-metadata"
+            let query = [
+                URLQueryItem(name: "title", value: title),
+                URLQueryItem(name: "artist", value: artist),
+                URLQueryItem(name: "durationMs", value: String(Int(duration * 1000)))
+            ]
+            if let resolved: ResolveResponse = try? await APIClient().call(path, authenticated: false, queryItems: query), !resolved.videoId.isEmpty {
+                ytCache[key] = resolved.videoId
+                return ResolvedMedia(
+                    videoId: resolved.videoId,
+                    duration: resolved.duration,
+                    title: resolved.title,
+                    artist: resolved.artist,
+                    spotifyId: resolved.spotifyId ?? spotifyId,
+                    thumbnail: resolved.thumbnail
+                )
+            }
+        }
+
+        if let vid = await resolveYouTubeId(title: title, artist: artist, duration: duration, spotifyId: spotifyId) {
+            return ResolvedMedia(videoId: vid, duration: duration > 0 ? duration : nil, title: title, artist: artist, spotifyId: spotifyId, thumbnail: nil)
+        }
+        return nil
+    }
+
     static func resolveYouTubeId(title: String, artist: String, duration: Double = 0, spotifyId: String? = nil) async -> String? {
         let key = "\(artist.lowercased())|\(title.lowercased())"
         if let cached = ytCache[key] { return cached }
 
         // 1. Prioritize backend resolution when server is configured
         if AppConfiguration.apiURL != nil {
-            let path = spotifyId.map { "api/music/resolve/\($0)" } ?? "api/music/resolve-by-metadata"
+            let path = (spotifyId != nil && spotifyId!.count == 22) ? "api/music/resolve/\(spotifyId!)" : "api/music/resolve-by-metadata"
             let query = [
                 URLQueryItem(name: "title", value: title),
                 URLQueryItem(name: "artist", value: artist),
                 URLQueryItem(name: "durationMs", value: String(Int(duration * 1000)))
             ]
-            if let resolved: ResolveResponse = try? await APIClient().call(path, queryItems: query), !resolved.videoId.isEmpty {
+            if let resolved: ResolveResponse = try? await APIClient().call(path, authenticated: false, queryItems: query), !resolved.videoId.isEmpty {
                 ytCache[key] = resolved.videoId
                 return resolved.videoId
             }

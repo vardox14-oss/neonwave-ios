@@ -15,7 +15,34 @@ enum LyricsService {
         let syncedLyrics: String?
     }
 
+    private struct ServerLyricsResponse: Decodable {
+        let syncedLyrics: String?
+        let plainLyrics: String?
+        let duration: Double?
+    }
+
     static func fetchLyrics(title: String, artist: String, duration: Double? = nil) async -> LyricsResult {
+        if AppConfiguration.apiURL != nil {
+            var query = [
+                URLQueryItem(name: "title", value: title),
+                URLQueryItem(name: "artist", value: artist)
+            ]
+            if let duration, duration > 0 {
+                query.append(URLQueryItem(name: "duration", value: String(Int(duration))))
+            }
+            if let response: ServerLyricsResponse = try? await APIClient().call("api/music/lyrics", authenticated: false, queryItems: query) {
+                if let synced = response.syncedLyrics, !synced.isEmpty {
+                    let parsed = parseLRC(synced)
+                    if !parsed.isEmpty {
+                        return LyricsResult(lines: parsed, plain: response.plainLyrics, sourceDuration: response.duration)
+                    }
+                }
+                if let plain = response.plainLyrics, !plain.isEmpty {
+                    return LyricsResult(lines: [], plain: plain, sourceDuration: response.duration)
+                }
+            }
+        }
+
         let primaryResult = await queryLRCLIB(title: title, artist: artist, duration: duration)
         if !primaryResult.lines.isEmpty {
             return primaryResult

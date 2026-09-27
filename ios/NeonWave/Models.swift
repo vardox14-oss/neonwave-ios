@@ -125,7 +125,14 @@ enum RepeatMode: Int, CaseIterable { case off, all, one }
 extension Double {
     var clockTime: String {
         guard isFinite, self > 0 else { return "0:00" }
-        let seconds = Int(self)
-        return String(format: "%d:%02d", seconds / 60, seconds % 60)
+        let total = Int(self.rounded())
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let seconds = total % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        } else {
+            return String(format: "%d:%02d", minutes, seconds)
+        }
     }
 }
