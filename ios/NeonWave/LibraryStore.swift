@@ -208,6 +208,7 @@ import UniformTypeIdentifiers
             } catch { }
         }
 
+#if !APPSTORE
         guard owner == userID,
               let current = snapshot.tracks.first(where: { $0.id == trackID }),
               canvasURL(current) == nil else { return }
@@ -229,6 +230,7 @@ import UniformTypeIdentifiers
             var url = destination; var values = URLResourceValues(); values.isExcludedFromBackup = true; try? url.setResourceValues(values)
             if let index = snapshot.tracks.firstIndex(where: { $0.id == trackID }) { snapshot.tracks[index].canvasFile = name; persist() }
         } catch { }
+#endif
     }
     func removeDownload(_ track: Track) {
         guard track.isDownloadedSource else { return }

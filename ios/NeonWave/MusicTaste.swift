@@ -97,6 +97,23 @@ enum ArtistDiscoveryService {
     }
 
     static func featured() async -> [ArtistChoice] {
+#if APPSTORE
+        return await withTaskGroup(of: ArtistChoice?.self, returning: [ArtistChoice].self) { group in
+            for name in MusicTasteStore.featuredNames {
+                group.addTask {
+                    await AppleMusicService.searchArtists(name, limit: 5).first {
+                        $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
+                    }
+                }
+            }
+            var artists: [ArtistChoice] = []
+            for await artist in group {
+                if let artist { artists.append(artist) }
+            }
+            let order = Dictionary(uniqueKeysWithValues: MusicTasteStore.featuredNames.enumerated().map { ($1.lowercased(), $0) })
+            return artists.sorted { (order[$0.name.lowercased()] ?? 999) < (order[$1.name.lowercased()] ?? 999) }
+        }
+#else
         guard AppConfiguration.apiURL != nil else {
             return MusicTasteStore.featuredNames.map { ArtistChoice(name: $0) }
         }
@@ -109,11 +126,15 @@ enum ArtistDiscoveryService {
         }
         let byName = Dictionary(items.map { ($0.name.lowercased(), $0) }, uniquingKeysWith: { first, _ in first })
         return MusicTasteStore.featuredNames.compactMap { byName[$0.lowercased()] }
+#endif
     }
 
     static func search(_ query: String) async -> [ArtistChoice] {
         let value = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard value.count >= 2 else { return [] }
+#if APPSTORE
+        return await AppleMusicService.searchArtists(value)
+#else
         if AppConfiguration.apiURL != nil {
             let response: ArtistResponse? = try? await APIClient().call(
                 "api/spotify/search-artists",
@@ -128,6 +149,7 @@ enum ArtistDiscoveryService {
               let (data, _) = try? await URLSession.shared.data(from: url),
               let response = try? JSONDecoder().decode(DeezerResponse.self, from: data) else { return [] }
         return (response.data ?? []).map { ArtistChoice(spotifyId: "", name: $0.name, imageUrl: $0.picture_xl ?? $0.picture_big ?? "", source: "deezer") }
+#endif
     }
 }
 

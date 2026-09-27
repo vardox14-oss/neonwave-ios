@@ -14,24 +14,34 @@ struct Track: Identifiable, Codable, Hashable {
     var streamURL: String?
     var videoId: String?
     var spotifyId: String?
+    var appleMusicID: String?
     var addedAt: Date
     var playCount: Int
     var lastPlayedAt: Date?
 
-    init(id: String = UUID().uuidString, title: String, artist: String = "Artiste inconnu", duration: Double = 0, fileName: String? = nil, remoteID: String? = nil, artworkFile: String? = nil, canvasFile: String? = nil, album: String? = nil, artworkURL: String? = nil, streamURL: String? = nil, videoId: String? = nil, spotifyId: String? = nil) {
+    init(id: String = UUID().uuidString, title: String, artist: String = "Artiste inconnu", duration: Double = 0, fileName: String? = nil, remoteID: String? = nil, artworkFile: String? = nil, canvasFile: String? = nil, album: String? = nil, artworkURL: String? = nil, streamURL: String? = nil, videoId: String? = nil, spotifyId: String? = nil, appleMusicID: String? = nil) {
         self.id = id; self.title = title; self.artist = artist; self.duration = duration
         self.fileName = fileName; self.remoteID = remoteID; self.artworkFile = artworkFile; self.canvasFile = canvasFile
         self.album = album; self.artworkURL = artworkURL; self.streamURL = streamURL
         self.videoId = videoId
         self.spotifyId = spotifyId
+        self.appleMusicID = appleMusicID
         self.addedAt = Date(); self.playCount = 0
     }
     var colorIndex: Int { id.utf8.reduce(0) { ($0 + Int($1)) % 6 } }
     var canDownload: Bool {
+#if APPSTORE
+        remoteID != nil
+#else
         remoteID != nil || streamURL != nil || videoId != nil || spotifyId != nil
+#endif
     }
     var isDownloadedSource: Bool {
+#if APPSTORE
+        remoteID != nil
+#else
         remoteID != nil || streamURL != nil || videoId != nil || spotifyId != nil
+#endif
     }
 }
 
@@ -42,6 +52,7 @@ struct Album: Identifiable, Codable, Hashable {
     var coverURL: String?
     var trackCount: Int?
     var releaseDate: String?
+    var appleMusicID: String? = nil
 }
 
 struct LyricLine: Identifiable, Hashable {

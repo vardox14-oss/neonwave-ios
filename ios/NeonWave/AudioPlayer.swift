@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 import MediaPlayer
+import MusicKit
 
 private final class SilentAudioKeepAlive {
     static let shared = SilentAudioKeepAlive()
@@ -83,6 +84,8 @@ private final class SilentAudioKeepAlive {
     @Published private(set) var lyricsOffset: Double = 0
 
     private let player = AVPlayer()
+    private let appleMusicPlayer = ApplicationMusicPlayer.shared
+    private var isAppleMusicActive = false
     private var isYouTubeActive = false
     private var resolveTask: Task<Void, Never>?
     private var timeObserver: Any?
@@ -98,6 +101,8 @@ private final class SilentAudioKeepAlive {
     private var resumeAfterInterruption = false
     private var shuffleHistory: [Int] = []
     private var bufferingWatchdogTask: Task<Void, Never>?
+    private var musicKitTimer: Timer?
+    private var musicKitCompletedTrackID: String?
 
     init() {
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.25, preferredTimescale: 600), queue: .main) { [weak self] time in
@@ -143,7 +148,13 @@ private final class SilentAudioKeepAlive {
             if reason == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue { Task { @MainActor in self?.pause() } }
         })
 
+#if !APPSTORE
         setupYouTubeCallbacks()
+#endif
+
+        musicKitTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refreshAppleMusicState() }
+        }
 
         let commands = MPRemoteCommandCenter.shared()
         commands.playCommand.addTarget { [weak self] _ in Task { @MainActor in self?.resume() }; return .success }
@@ -209,10 +220,15 @@ private final class SilentAudioKeepAlive {
 
     func isPlayable(_ track: Track) -> Bool {
         if library?.localURL(track) != nil { return true }
+#if APPSTORE
+        return track.appleMusicID != nil
+#else
+        if track.appleMusicID != nil { return true }
         if track.videoId != nil { return true }
         if track.streamURL != nil { return true }
         if !track.title.isEmpty { return true }
         return false
+#endif
     }
 
     func playableURL(for track: Track) -> URL? {
@@ -249,9 +265,13 @@ private final class SilentAudioKeepAlive {
 
         // 1. If downloaded / imported locally, use native AVPlayer
         if let localURL = library?.localURL(target) {
+            isAppleMusicActive = false
+            appleMusicPlayer.stop()
             isYouTubeActive = false
             SilentAudioKeepAlive.shared.stop()
+#if !APPSTORE
             YouTubePlayer.shared.stop()
+#endif
 
             let item = AVPlayerItem(url: localURL)
             statusObserver = item.observe(\.status, options: [.new]) { [weak self] item, _ in
@@ -266,6 +286,17 @@ private final class SilentAudioKeepAlive {
             return
         }
 
+        if target.appleMusicID != nil {
+            startAppleMusicPlayback(target)
+            return
+        }
+
+#if APPSTORE
+        isBuffering = false
+        loadingLyrics = false
+        error = "Ce titre n’est pas disponible via Apple Music. Importez votre propre fichier audio pour l’écouter hors connexion."
+        return
+#else
         // 2. Online track: resolve the complete song, then play it natively.
         // Native AVPlayer keeps playing with the screen locked and exposes the
         // real iOS lock-screen controls.
@@ -303,6 +334,59 @@ private final class SilentAudioKeepAlive {
                     }
                 }
             }
+        }
+#endif
+    }
+
+    private func startAppleMusicPlayback(_ target: Track) {
+        guard let appleMusicID = target.appleMusicID else { return }
+        isAppleMusicActive = true
+        isYouTubeActive = false
+        musicKitCompletedTrackID = nil
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+        SilentAudioKeepAlive.shared.stop()
+#if !APPSTORE
+        YouTubePlayer.shared.stop()
+#endif
+        isPlaying = false
+        isBuffering = true
+        lyricsFallbackTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            await MainActor.run { self?.fetchLyricsForCurrent(preferredDuration: target.duration) }
+        }
+        resolveTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                guard let song = try await AppleMusicService.songs(ids: [appleMusicID]).first else {
+                    throw MessageError("Ce titre Apple Music est indisponible dans votre région.")
+                }
+                guard self.current?.id == target.id else { return }
+                self.appleMusicPlayer.queue = ApplicationMusicPlayer.Queue(for: [song], startingAt: song)
+                try await self.appleMusicPlayer.play()
+                self.isPlaying = true
+                self.isBuffering = false
+                self.library?.recordPlay(target)
+                self.fetchLyricsForCurrent(preferredDuration: song.duration ?? target.duration)
+            } catch {
+                guard self.current?.id == target.id else { return }
+                self.isPlaying = false
+                self.isBuffering = false
+                self.error = error.localizedDescription
+            }
+        }
+    }
+
+    private func refreshAppleMusicState() {
+        guard isAppleMusicActive, current != nil else { return }
+        elapsed = appleMusicPlayer.playbackTime.isFinite ? appleMusicPlayer.playbackTime : 0
+        isPlaying = appleMusicPlayer.state.playbackStatus == .playing
+        isBuffering = appleMusicPlayer.state.playbackStatus == .seekingForward || appleMusicPlayer.state.playbackStatus == .seekingBackward
+        updateActiveLyric()
+        if duration > 0, elapsed >= duration - 0.35, musicKitCompletedTrackID != current?.id {
+            musicKitCompletedTrackID = current?.id
+            next(automatic: true)
         }
     }
 
@@ -410,8 +494,12 @@ private final class SilentAudioKeepAlive {
 
     func pause() {
         bufferingWatchdogTask?.cancel()
-        if isYouTubeActive {
+        if isAppleMusicActive {
+            appleMusicPlayer.pause()
+        } else if isYouTubeActive {
+#if !APPSTORE
             YouTubePlayer.shared.pause()
+#endif
             SilentAudioKeepAlive.shared.pause()
         } else {
             player.pause()
@@ -424,10 +512,24 @@ private final class SilentAudioKeepAlive {
         guard current != nil else { return }
         do {
             try AVAudioSession.sharedInstance().setActive(true)
-            if isYouTubeActive {
+            if isAppleMusicActive {
+                isBuffering = true
+                Task { [weak self] in
+                    do {
+                        try await self?.appleMusicPlayer.play()
+                        self?.isPlaying = true
+                        self?.isBuffering = false
+                    } catch {
+                        self?.isBuffering = false
+                        self?.error = error.localizedDescription
+                    }
+                }
+            } else if isYouTubeActive {
+#if !APPSTORE
                 isBuffering = true
                 SilentAudioKeepAlive.shared.start()
                 YouTubePlayer.shared.resume()
+#endif
             } else {
                 player.play()
                 isPlaying = true
@@ -443,8 +545,12 @@ private final class SilentAudioKeepAlive {
         guard seconds.isFinite else { return }
         let targetTime = min(max(0, seconds), duration > 0 ? duration : seconds)
         elapsed = targetTime
-        if isYouTubeActive {
+        if isAppleMusicActive {
+            appleMusicPlayer.playbackTime = targetTime
+        } else if isYouTubeActive {
+#if !APPSTORE
             YouTubePlayer.shared.seek(to: targetTime)
+#endif
         } else {
             player.seek(to: CMTime(seconds: targetTime, preferredTimescale: 600))
         }
@@ -494,12 +600,16 @@ private final class SilentAudioKeepAlive {
         lyricsTask?.cancel()
         lyricsFallbackTask?.cancel()
         if isYouTubeActive {
+#if !APPSTORE
             YouTubePlayer.shared.stop()
+#endif
             SilentAudioKeepAlive.shared.stop()
         }
+        appleMusicPlayer.stop()
         player.pause()
         player.replaceCurrentItem(with: nil)
         isYouTubeActive = false
+        isAppleMusicActive = false
         isPlaying = false
         isBuffering = false
         current = nil
@@ -519,6 +629,7 @@ private final class SilentAudioKeepAlive {
     }
 
     private func updateNowPlaying(includeArtwork: Bool = false) {
+        guard !isAppleMusicActive else { return }
         guard let current else {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
             MPNowPlayingInfoCenter.default().playbackState = .stopped

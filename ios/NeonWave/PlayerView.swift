@@ -102,6 +102,11 @@ struct PlayerView: View {
             }
             canvasURL = nil
             showArtworkOverlay = false
+#if APPSTORE
+            // App Store builds use an artwork-derived NeonWave motion backdrop.
+            // Spotify Canvas videos are proprietary and aren't copied into the app.
+            _ = track
+#else
             if let localCanvas = library.canvasURL(track) {
                 canvasURL = localCanvas
                 return
@@ -112,6 +117,7 @@ struct PlayerView: View {
                     canvasURL = url
                 }
             }
+#endif
         }
     }
 
@@ -147,13 +153,21 @@ struct PlayerView: View {
                         LinearGradient(colors: NW.colors[track.colorIndex], startPoint: .topLeading, endPoint: .bottomTrailing)
                     }
                     .frame(width: size.width, height: size.height)
-                    .scaleEffect(1.4)
+                    .scaleEffect(player.isPlaying && !reduceMotion ? 1.52 : 1.4)
+                    .rotationEffect(.degrees(player.isPlaying && !reduceMotion ? 1.8 : -1.8))
                     .blur(radius: 72)
                     .opacity(0.38)
                     .clipped()
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 7).repeatForever(autoreverses: true), value: player.isPlaying)
 
                     LinearGradient(colors: [.black.opacity(0.12), NW.background.opacity(0.72), NW.background], startPoint: .top, endPoint: .bottom)
                     RadialGradient(colors: [NW.colors[track.colorIndex][0].opacity(0.19), .clear], center: .topTrailing, startRadius: 20, endRadius: 390)
+                    Circle()
+                        .fill(NW.colors[track.colorIndex][1].opacity(player.isPlaying ? 0.16 : 0.08))
+                        .frame(width: size.width * 0.9)
+                        .blur(radius: 80)
+                        .offset(x: player.isPlaying ? size.width * 0.24 : -size.width * 0.18, y: -size.height * 0.18)
+                        .animation(reduceMotion ? nil : .easeInOut(duration: 6).repeatForever(autoreverses: true), value: player.isPlaying)
                 }
             }
             .frame(width: size.width, height: size.height)

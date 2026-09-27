@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   simulator:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 25
     defaults:
       run:
@@ -44,6 +44,29 @@ jobs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
             ${NEONWAVE_API_URL:+NEONWAVE_API_URL=$NEONWAVE_API_URL} \
             build 2>&1 | tee ios/build/xcodebuild.log
+
+      - name: Compile the App Store code path with Xcode 26
+        run: |
+          set -euo pipefail
+          XCODE_MAJOR=$(xcodebuild -version | awk 'NR==1 { split($2, version, "."); print version[1] }')
+          if [ "$XCODE_MAJOR" -lt 26 ]; then
+            echo "error: App Store uploads require Xcode 26 or newer."
+            exit 1
+          fi
+          xcodebuild \
+            -project ios/NeonWave.xcodeproj \
+            -scheme NeonWave \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath ios/DerivedData-Release \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            DEVELOPMENT_TEAM=CI0000000 \
+            NEONWAVE_API_URL=https://api.ci.neonwave.app \
+            NEONWAVE_PRIVACY_URL=https://neonwave.app/privacy \
+            NEONWAVE_SUPPORT_URL=https://neonwave.app/support \
+            build 2>&1 | tee ios/build/xcodebuild-release.log
 
       - name: Package the simulator app for Appetize
         run: |
@@ -144,6 +167,7 @@ jobs:
             ios/build/NeonWave-iOS-Simulator.zip
             ios/build/NeonWave-iPhone.png
             ios/build/xcodebuild.log
+            ios/build/xcodebuild-release.log
             ios/build/tests.log
             ios/build/NeonWaveTests.xcresult
           if-no-files-found: warn

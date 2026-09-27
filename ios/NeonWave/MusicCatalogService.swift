@@ -88,7 +88,11 @@ enum MusicCatalogService {
 
     static func searchTracks(_ query: String) async -> [Track] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return [] }
+        guard !trimmed.isEmpty else { return [] }
+#if APPSTORE
+        return await AppleMusicService.searchTracks(trimmed)
+#else
+        guard let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return [] }
 
         // Same Spotify-first catalogue as the desktop app. Keeping spotifyId is
         // essential: it is also the key used to request the real Spotify Canvas.
@@ -164,11 +168,16 @@ enum MusicCatalogService {
         }
 
         return []
+#endif
     }
 
     static func searchAlbums(_ query: String) async -> [Album] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return [] }
+        guard !trimmed.isEmpty else { return [] }
+#if APPSTORE
+        return await AppleMusicService.searchAlbums(trimmed)
+#else
+        guard let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return [] }
 
         if let url = URL(string: "https://api.deezer.com/search/album?q=\(encoded)&limit=20") {
             do {
@@ -190,9 +199,17 @@ enum MusicCatalogService {
         }
 
         return []
+#endif
     }
 
     static func fetchAlbumTracks(albumId: String, albumTitle: String, artistName: String, coverURL: String?) async -> [Track] {
+#if APPSTORE
+        return await AppleMusicService.albumTracks(
+            albumID: albumId.replacingOccurrences(of: "am-", with: ""),
+            title: albumTitle,
+            artist: artistName
+        )
+#else
         let cleanId = albumId.replacingOccurrences(of: "dz-", with: "")
         guard let url = URL(string: "https://api.deezer.com/album/\(cleanId)/tracks?limit=50") else { return [] }
         do {
@@ -214,17 +231,22 @@ enum MusicCatalogService {
             }
         } catch { }
         return []
+#endif
     }
 
     private static var ytCache: [String: String] = [:]
 
     static func nativeStreamURL(videoId: String) async -> URL? {
+#if APPSTORE
+        return nil
+#else
         guard let baseURL = AppConfiguration.apiURL,
               let response: StreamTicketResponse = try? await APIClient().call(
                 "api/music/streams/\(videoId)/ticket",
                 method: "POST"
               ) else { return nil }
         return URL(string: response.path, relativeTo: baseURL)?.absoluteURL
+#endif
     }
 
     struct YouTubeCandidate: Equatable {
@@ -235,6 +257,9 @@ enum MusicCatalogService {
     }
 
     static func resolveYouTubeId(title: String, artist: String, duration: Double = 0, spotifyId: String? = nil) async -> String? {
+#if APPSTORE
+        return nil
+#else
         let key = "\(artist.lowercased())|\(title.lowercased())"
         if let cached = ytCache[key] { return cached }
 
@@ -296,6 +321,7 @@ enum MusicCatalogService {
             }
         } catch { }
         return nil
+#endif
     }
 
     static func bestYouTubeCandidate(_ candidates: [YouTubeCandidate], title: String, artist: String, duration: Double) -> YouTubeCandidate? {
