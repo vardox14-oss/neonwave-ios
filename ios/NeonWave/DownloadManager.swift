@@ -3,6 +3,7 @@ import AVFoundation
 import Combine
 import UIKit
 import SwiftUI
+import Network
 
 final class DownloadManager: NSObject, ObservableObject, URLSessionDownloadDelegate {
     static let shared = DownloadManager()
@@ -238,3 +239,33 @@ final class DownloadManager: NSObject, ObservableObject, URLSessionDownloadDeleg
         DispatchQueue.main.async { self.backgroundCompletion?(); self.backgroundCompletion = nil }
     }
 }
+
+@MainActor
+final class NetworkMonitor: NSObject, ObservableObject {
+    static let shared = NetworkMonitor()
+    @Published private(set) var isConnected: Bool = true
+    @Published var isOfflineModeForced: Bool = false {
+        didSet {
+            UserDefaults.standard.set(isOfflineModeForced, forKey: "forceOfflineMode")
+        }
+    }
+
+    var isActuallyOffline: Bool {
+        isOfflineModeForced || !isConnected
+    }
+
+    private let monitor = NWPathMonitor()
+    private let queue = DispatchQueue(label: "app.neonwave.networkmonitor")
+
+    private override init() {
+        super.init()
+        self.isOfflineModeForced = UserDefaults.standard.bool(forKey: "forceOfflineMode")
+        monitor.pathUpdateHandler = { [weak self] path in
+            Task { @MainActor in
+                self?.isConnected = (path.status == .satisfied)
+            }
+        }
+        monitor.start(queue: queue)
+    }
+}
+

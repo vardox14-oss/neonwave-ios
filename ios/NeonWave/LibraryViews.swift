@@ -221,6 +221,7 @@ struct LibraryView: View {
                 VStack(spacing: 14) {
                     NavigationLink { TrackCollectionView(title: "Tous les titres", kind: .all) } label: { collectionRow("Tous les titres", subtitle: "\(library.tracks.count) titres", symbol: "music.note", index: 0) }
                     NavigationLink { TrackCollectionView(title: "Titres aimés", kind: .liked) } label: { collectionRow("Titres aimés", subtitle: "\(library.liked.count) coups de cœur", symbol: "heart.fill", index: 2) }
+                    NavigationLink { TrackCollectionView(title: "Sur cet iPhone", kind: .downloaded) } label: { collectionRow("Sur cet iPhone", subtitle: "\(library.downloaded.count) titres hors ligne", symbol: "arrow.down.circle.fill", index: 1) }
                 }.buttonStyle(PressStyle())
                 SectionHeading(title: "Vos playlists", eyebrow: "Toutes vos ambiances")
                 if library.playlists.isEmpty {
@@ -307,6 +308,7 @@ struct SearchView: View {
     @EnvironmentObject private var library: LibraryStore
     @EnvironmentObject private var player: AudioPlayer
     @EnvironmentObject private var downloads: DownloadManager
+    @EnvironmentObject private var network: NetworkMonitor
     @State private var query = ""
     @State private var filter = 0
     @State private var searching = false
@@ -326,6 +328,20 @@ struct SearchView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 SectionHeading(title: "Retrouvez votre son.", eyebrow: "Recherche").padding(.top, 16)
+                if network.isActuallyOffline {
+                    HStack(spacing: 8) {
+                        Image(systemName: "wifi.slash")
+                            .font(.caption.bold())
+                            .foregroundStyle(.orange)
+                        Text("Mode hors connexion : recherche dans vos musiques enregistrées.")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(NW.muted)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Color.orange.opacity(0.12), in: Capsule())
+                    .overlay(Capsule().stroke(Color.orange.opacity(0.25)))
+                }
                 HStack(spacing: 12) {
                     Image(systemName: "magnifyingglass").foregroundStyle(NW.muted)
                     TextField("Rechercher un titre, Saïf, un album…", text: $query)
@@ -355,7 +371,30 @@ struct SearchView: View {
                 .pickerStyle(.segmented)
 
                 if filter == 0 {
-                    if searching {
+                    if network.isActuallyOffline {
+                        VStack(spacing: 14) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "wifi.slash").foregroundStyle(.orange)
+                                Text("Catalogue en ligne indisponible hors connexion.")
+                                    .font(.subheadline)
+                                    .foregroundStyle(NW.muted)
+                            }
+                            .padding(.top, 10)
+
+                            if localResults.isEmpty {
+                                EmptyLibrary(
+                                    symbol: "magnifyingglass",
+                                    title: "Aucun résultat sur cet iPhone",
+                                    description: "Aucun morceau téléchargé ou favori ne correspond à votre recherche."
+                                )
+                            } else {
+                                Text("\(localResults.count) TITRE\(localResults.count > 1 ? "S" : "") ENREGISTRÉ\(localResults.count > 1 ? "S" : "")").font(.system(size: 9, weight: .bold)).tracking(1.5).foregroundStyle(NW.muted)
+                                LazyVStack(spacing: 2) {
+                                    ForEach(localResults) { TrackRow(track: $0, context: localResults) }
+                                }
+                            }
+                        }
+                    } else if searching {
                         HStack(spacing: 12) {
                             ProgressView().tint(NW.blue)
                             Text("Recherche dans le catalogue…").font(.subheadline).foregroundStyle(NW.muted)
@@ -432,6 +471,11 @@ struct SearchView: View {
         .sheet(item: $selectedAlbum) { album in
             AlbumDetailView(album: album)
         }
+        .onAppear {
+            if network.isActuallyOffline && filter == 0 {
+                filter = 2
+            }
+        }
     }
 
     private var discoveryLanding: some View {
@@ -465,6 +509,10 @@ struct SearchView: View {
         searchTask?.cancel()
         guard !trimmed.isEmpty else {
             onlineTracks = []; onlineAlbums = []; searching = false; return
+        }
+        if network.isActuallyOffline {
+            searching = false
+            return
         }
         searching = true
         searchTask = Task {
@@ -582,6 +630,7 @@ struct AlbumDetailView: View {
 
 struct DownloadsView: View {
     @EnvironmentObject private var library: LibraryStore
+    @EnvironmentObject private var player: AudioPlayer
     @EnvironmentObject private var downloads: DownloadManager
     let importFiles: () -> Void
     var body: some View {
@@ -615,6 +664,46 @@ struct DownloadsView: View {
                 if library.downloaded.isEmpty {
                     EmptyLibrary(symbol: "arrow.down.circle", title: "La musique, même sans réseau.", description: "Téléchargez un titre depuis Recherche ou importez vos propres fichiers audio.", actionTitle: "Importer des fichiers", action: importFiles)
                 } else {
+                    HStack(spacing: 12) {
+                        Button {
+                            if let first = library.downloaded.first {
+                                player.play(first, in: library.downloaded)
+                            }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "play.fill")
+                                    .font(.system(size: 14, weight: .bold))
+                                Text("Tout écouter")
+                                    .font(.subheadline.bold())
+                            }
+                            .foregroundStyle(.black)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 44)
+                            .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        }
+                        .buttonStyle(PressStyle())
+
+                        Button {
+                            if let randomTrack = library.downloaded.randomElement() {
+                                player.shuffle = true
+                                player.play(randomTrack, in: library.downloaded)
+                            }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "shuffle")
+                                    .font(.system(size: 14, weight: .bold))
+                                Text("Aléatoire")
+                                    .font(.subheadline.bold())
+                            }
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 44)
+                            .background(NW.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.10)))
+                        }
+                        .buttonStyle(PressStyle())
+                    }
+
                     SectionHeading(title: "Disponibles hors connexion")
                     LazyVStack(spacing: 2) { ForEach(library.downloaded) { TrackRow(track: $0, context: library.downloaded) } }
                 }

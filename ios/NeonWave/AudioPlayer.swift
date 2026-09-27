@@ -280,7 +280,14 @@ private final class SilentAudioKeepAlive {
             if isPlaying { pause() } else { resume() }
             return
         }
-        let list = tracks ?? [track]
+        var list = tracks ?? [track]
+        if NetworkMonitor.shared.isActuallyOffline {
+            if library?.localURL(track) == nil {
+                error = "Ce titre n’a pas été téléchargé pour le mode hors connexion."
+                return
+            }
+            list = list.filter { library?.localURL($0) != nil }
+        }
         let playable = list.filter { isPlayable($0) }
         guard !playable.isEmpty, let target = playable.first(where: { $0.id == track.id }) ?? playable.first else {
             error = "Source audio introuvable pour ce titre."; return

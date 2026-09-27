@@ -6,6 +6,7 @@ struct SettingsView: View {
     @EnvironmentObject private var player: AudioPlayer
     @EnvironmentObject private var downloads: DownloadManager
     @EnvironmentObject private var taste: MusicTasteStore
+    @EnvironmentObject private var network: NetworkMonitor
     @Environment(\.dismiss) private var dismiss
     @State private var confirmLogout = false
     @State private var confirmDelete = false
@@ -27,6 +28,21 @@ struct SettingsView: View {
                     stat("Coups de cœur", value: String(library.liked.count), symbol: "heart")
                     stat("Écoutes lancées", value: String(library.tracks.reduce(0) { $0 + $1.playCount }), symbol: "waveform")
                     stat("Stockage audio", value: ByteCountFormatter.string(fromByteCount: library.storageBytes, countStyle: .file), symbol: "internaldrive")
+                }.listRowBackground(NW.surface)
+                Section("Connectivité & Réseau") {
+                    Toggle("Forcer le mode hors connexion", isOn: $network.isOfflineModeForced)
+                    HStack {
+                        Label("État du réseau", systemImage: network.isConnected ? "wifi" : "wifi.slash")
+                        Spacer()
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(network.isConnected ? Color.green : Color.orange)
+                                .frame(width: 8, height: 8)
+                            Text(network.isConnected ? "Connecté" : "Déconnecté")
+                                .font(.subheadline)
+                                .foregroundStyle(NW.muted)
+                        }
+                    }
                 }.listRowBackground(NW.surface)
                 Section("À votre façon") {
                     Button { showTaste = true } label: { Label("Mes goûts musicaux", systemImage: "sparkles") }

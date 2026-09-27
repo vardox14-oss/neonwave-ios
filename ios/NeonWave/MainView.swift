@@ -7,6 +7,7 @@ struct MainView: View {
     @EnvironmentObject private var player: AudioPlayer
     @EnvironmentObject private var downloads: DownloadManager
     @EnvironmentObject private var artistRouter: ArtistRouter
+    @EnvironmentObject private var network: NetworkMonitor
     @State private var tab: LibraryTab = .home
     @State private var showImport = false
     @State private var showPlayer = false
@@ -34,7 +35,25 @@ struct MainView: View {
                 .background(Color.clear)
                 .toolbarBackground(.hidden, for: .navigationBar)
                 .toolbar {
-                    ToolbarItem(placement: .topBarLeading) { NeonWaveWordmark() }
+                    ToolbarItem(placement: .topBarLeading) {
+                        HStack(spacing: 9) {
+                            NeonWaveWordmark()
+                            if network.isActuallyOffline {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "wifi.slash")
+                                        .font(.system(size: 8, weight: .bold))
+                                    Text("HORS LIGNE")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .tracking(0.6)
+                                }
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3.5)
+                                .background(Color.orange.opacity(0.18), in: Capsule())
+                                .overlay(Capsule().stroke(Color.orange.opacity(0.35), lineWidth: 1))
+                                .foregroundStyle(Color.orange)
+                            }
+                        }
+                    }
                     ToolbarItem(placement: .topBarTrailing) {
                         ProfileButton(name: session.account?.username ?? "N") { showSettings = true }
                     }
@@ -157,6 +176,7 @@ struct HomeView: View {
     @EnvironmentObject private var player: AudioPlayer
     @EnvironmentObject private var taste: MusicTasteStore
     @EnvironmentObject private var artistRouter: ArtistRouter
+    @EnvironmentObject private var network: NetworkMonitor
     let importFiles: () -> Void
 
     private var greeting: String {
@@ -167,25 +187,29 @@ struct HomeView: View {
     }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 30) {
-                welcomeHeader
-                HomeMixHero(importFiles: importFiles)
-                quickActions
+        if network.isActuallyOffline {
+            OfflineModeView(importFiles: importFiles)
+        } else {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 30) {
+                    welcomeHeader
+                    HomeMixHero(importFiles: importFiles)
+                    quickActions
 
-                if !taste.preferences.artists.isEmpty { artistShelf }
-                if !taste.recommendations.isEmpty { recommendationShelf }
-                if !library.recent.isEmpty { recentShelf }
+                    if !taste.preferences.artists.isEmpty { artistShelf }
+                    if !taste.recommendations.isEmpty { recommendationShelf }
+                    if !library.recent.isEmpty { recentShelf }
 
-                collectionSection
-                listeningPromise
+                    collectionSection
+                    listeningPromise
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+                .padding(.bottom, 145)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 12)
-            .padding(.bottom, 145)
+            .scrollIndicators(.hidden)
+            .scrollBounceBehavior(.always, axes: .vertical)
         }
-        .scrollIndicators(.hidden)
-        .scrollBounceBehavior(.always, axes: .vertical)
     }
 
     private var welcomeHeader: some View {
@@ -393,5 +417,235 @@ private struct TrackShelf: View {
                 }
             }.padding(.horizontal, 1).padding(.bottom, 5)
         }.scrollIndicators(.hidden)
+    }
+}
+
+struct OfflineModeView: View {
+    @EnvironmentObject private var library: LibraryStore
+    @EnvironmentObject private var player: AudioPlayer
+    @EnvironmentObject private var network: NetworkMonitor
+    let importFiles: () -> Void
+
+    @State private var query = ""
+    @State private var filterFavoritesOnly = false
+
+    private var offlineTracks: [Track] {
+        library.downloaded
+    }
+
+    private var filteredTracks: [Track] {
+        offlineTracks.filter { track in
+            let matchesQuery = query.isEmpty ||
+                track.title.localizedCaseInsensitiveContains(query) ||
+                track.artist.localizedCaseInsensitiveContains(query)
+            let matchesFav = !filterFavoritesOnly || library.snapshot.likedIDs.contains(track.id)
+            return matchesQuery && matchesFav
+        }
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 22) {
+                offlineHeader
+
+                if offlineTracks.isEmpty {
+                    emptyOfflineState
+                } else {
+                    playbackControlsCard
+                    searchBar
+
+                    HStack {
+                        Text("\(filteredTracks.count) MORCEAU\(filteredTracks.count > 1 ? "X" : "") DISPONIBLE\(filteredTracks.count > 1 ? "S" : "")")
+                            .font(.system(size: 10, weight: .bold))
+                            .tracking(1.4)
+                            .foregroundStyle(NW.muted)
+                        Spacer()
+                        if !library.liked.filter({ library.localURL($0) != nil }).isEmpty {
+                            Button {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                    filterFavoritesOnly.toggle()
+                                }
+                            } label: {
+                                HStack(spacing: 5) {
+                                    Image(systemName: filterFavoritesOnly ? "heart.fill" : "heart")
+                                        .font(.system(size: 11, weight: .semibold))
+                                    Text("Favoris")
+                                        .font(.system(size: 11, weight: .semibold))
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(filterFavoritesOnly ? Color.pink.opacity(0.2) : NW.surface, in: Capsule())
+                                .overlay(Capsule().stroke(filterFavoritesOnly ? Color.pink.opacity(0.5) : .white.opacity(0.08)))
+                                .foregroundStyle(filterFavoritesOnly ? Color.pink : NW.muted)
+                            }
+                        }
+                    }
+                    .padding(.top, 4)
+
+                    LazyVStack(spacing: 6) {
+                        ForEach(filteredTracks) { track in
+                            TrackRow(track: track, context: offlineTracks)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 12)
+            .padding(.bottom, 145)
+        }
+        .scrollIndicators(.hidden)
+        .scrollBounceBehavior(.always, axes: .vertical)
+    }
+
+    private var offlineHeader: some View {
+        ZStack(alignment: .bottomLeading) {
+            LinearGradient(
+                colors: [Color.orange.opacity(0.28), NW.blue.opacity(0.22), NW.surface],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "wifi.slash")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.orange)
+                    Text("MODE HORS CONNEXION")
+                        .font(.system(size: 11, weight: .bold))
+                        .tracking(1.4)
+                        .foregroundStyle(.orange)
+                    Spacer()
+                    if network.isOfflineModeForced {
+                        Button {
+                            network.isOfflineModeForced = false
+                        } label: {
+                            Text("Quitter le forçage")
+                                .font(.system(size: 10, weight: .semibold))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.white.opacity(0.12), in: Capsule())
+                                .foregroundStyle(.white)
+                        }
+                    }
+                }
+
+                Text("Votre musique,\nmême sans réseau.")
+                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .tracking(-0.8)
+                    .foregroundStyle(.white)
+
+                Text("Seuls les morceaux téléchargés ou importés sur cet iPhone sont lisibles sans connexion Internet.")
+                    .font(.caption)
+                    .foregroundStyle(NW.muted)
+                    .lineLimit(2)
+            }
+            .padding(20)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 24).stroke(Color.orange.opacity(0.25), lineWidth: 1))
+    }
+
+    private var playbackControlsCard: some View {
+        HStack(spacing: 12) {
+            Button {
+                if let first = filteredTracks.first ?? offlineTracks.first {
+                    player.play(first, in: offlineTracks)
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 14, weight: .bold))
+                    Text("Tout écouter")
+                        .font(.subheadline.bold())
+                }
+                .foregroundStyle(.black)
+                .frame(maxWidth: .infinity)
+                .frame(height: 46)
+                .background(Color.white, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+            }
+            .buttonStyle(PressStyle())
+
+            Button {
+                if let randomTrack = (filteredTracks.isEmpty ? offlineTracks : filteredTracks).randomElement() {
+                    player.shuffle = true
+                    player.play(randomTrack, in: offlineTracks)
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "shuffle")
+                        .font(.system(size: 14, weight: .bold))
+                    Text("Aléatoire")
+                        .font(.subheadline.bold())
+                }
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 46)
+                .background(NW.surface, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 15).stroke(.white.opacity(0.10)))
+            }
+            .buttonStyle(PressStyle())
+        }
+    }
+
+    private var searchBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(NW.muted)
+                .font(.system(size: 14))
+            TextField("Filtrer vos morceaux hors ligne…", text: $query)
+                .font(.subheadline)
+                .autocorrectionDisabled()
+            if !query.isEmpty {
+                Button { query = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(NW.muted)
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(NW.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.08)))
+    }
+
+    private var emptyOfflineState: some View {
+        VStack(spacing: 18) {
+            ZStack {
+                Circle()
+                    .fill(Color.orange.opacity(0.12))
+                    .frame(width: 80, height: 80)
+                Image(systemName: "arrow.down.circle")
+                    .font(.system(size: 38))
+                    .foregroundStyle(.orange)
+            }
+            .padding(.top, 24)
+
+            VStack(spacing: 8) {
+                Text("Aucun titre hors ligne")
+                    .font(.title3.bold())
+                    .foregroundStyle(.white)
+                Text("Pour écouter de la musique sans connexion, téléchargez vos titres favoris lorsque vous avez du réseau, ou importez des fichiers audio directement.")
+                    .font(.subheadline)
+                    .foregroundStyle(NW.muted)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+            }
+
+            Button(action: importFiles) {
+                HStack(spacing: 8) {
+                    Image(systemName: "square.and.arrow.down")
+                    Text("Importer des fichiers audio")
+                }
+                .font(.subheadline.bold())
+                .foregroundStyle(.white)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 14)
+                .background(NW.blue, in: Capsule())
+            }
+            .padding(.top, 8)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 32)
+        .background(NW.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.08)))
     }
 }
