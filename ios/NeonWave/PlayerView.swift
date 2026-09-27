@@ -49,6 +49,7 @@ struct PlayerView: View {
     @State private var dragging = false
     @State private var scrub = 0.0
     @State private var canvasURL: URL? = nil
+    @State private var selectedArtist: ArtistIdentifier? = nil
     @State private var showArtworkOverlay = false
 
     var body: some View {
@@ -122,6 +123,7 @@ struct PlayerView: View {
         }
         .ignoresSafeArea()
         .sheet(isPresented: $showQueue) { QueueView() }
+        .sheet(item: $selectedArtist) { artist in ArtistDetailView(artist: artist) }
         .confirmationDialog("Minuterie de sommeil", isPresented: $showTimer, titleVisibility: .visible) {
             ForEach([15, 30, 45, 60, 90], id: \.self) { minutes in Button("Dans \(minutes) minutes") { player.setSleep(minutes: minutes) } }
             if player.sleepUntil != nil { Button("Désactiver la minuterie", role: .destructive) { player.setSleep(minutes: nil) } }
@@ -338,7 +340,15 @@ struct PlayerView: View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(track.title).font(.system(size: 22, weight: .bold, design: .rounded)).tracking(-0.5).lineLimit(1)
-                Text(track.artist).font(.subheadline.weight(.medium)).foregroundStyle(.white.opacity(0.55)).lineLimit(1)
+                Button {
+                    selectedArtist = ArtistIdentifier(name: track.artist, spotifyId: track.spotifyId)
+                } label: {
+                    HStack(spacing: 5) {
+                        Text(track.artist).font(.subheadline.weight(.medium)).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
+                        Image(systemName: "chevron.right").font(.system(size: 9, weight: .bold)).foregroundStyle(.white.opacity(0.35))
+                    }
+                }
+                .buttonStyle(.plain)
             }.frame(maxWidth: .infinity, alignment: .leading)
             if let progress = downloads.progress[track.id] {
                 Button { downloads.cancel(track.id) } label: {

@@ -434,5 +434,228 @@ enum MusicCatalogService {
             .replacingOccurrences(of: #"[^a-z0-9]+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespaces)
     }
-}
 
+    struct ArtistProfileResponse: Decodable {
+        let item: ArtistProfileData.Item?
+        let spotifyEnabled: Bool?
+    }
+
+    enum ArtistProfileData {
+        struct ArtistItem: Decodable {
+            let spotifyId: String?
+            let name: String
+            let imageUrl: String?
+            let spotifyUrl: String?
+            let genres: [String]?
+            let popularity: Int?
+            let followers: Int?
+            let source: String?
+        }
+
+        struct DiscographyItem: Identifiable, Decodable {
+            var id: String { "\(name)-\(releaseDate ?? "")-\(spotifyId ?? deezerId ?? "")" }
+            let name: String
+            let imageUrl: String?
+            let releaseDate: String?
+            let type: String?
+            let group: String?
+            let spotifyId: String?
+            let deezerId: String?
+        }
+
+        struct Discography: Decodable {
+            let popular: [DiscographyItem]?
+            let albums: [DiscographyItem]?
+            let singles: [DiscographyItem]?
+        }
+
+        struct RelatedArtist: Identifiable, Decodable {
+            var id: String { spotifyId.map { "sp-\($0)" } ?? name }
+            let spotifyId: String?
+            let name: String
+            let imageUrl: String?
+            let followers: Int?
+        }
+
+        struct TrackItem: Decodable {
+            let id: String?
+            let title: String
+            let artist: String?
+            let album: String?
+            let thumbnail: String?
+            let duration: Double?
+            let durationMs: Double?
+            let spotifyId: String?
+            let videoId: String?
+        }
+
+        struct Item: Decodable {
+            let artist: ArtistItem?
+            let topTracks: [TrackItem]?
+            let discography: Discography?
+            let relatedArtists: [RelatedArtist]?
+        }
+    }
+
+    static func fetchArtistProfile(name: String, spotifyId: String? = nil) async -> ArtistProfileData.Item? {
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanName.isEmpty else { return nil }
+
+        if AppConfiguration.apiURL != nil {
+            var query = [URLQueryItem(name: "name", value: cleanName)]
+            if let spId = spotifyId, spId.count == 22 {
+                query.append(URLQueryItem(name: "spotifyId", value: spId))
+            }
+            if let response: ArtistProfileResponse = try? await APIClient().call(
+                "api/spotify/artist-profile",
+                authenticated: false,
+                queryItems: query
+            ), let item = response.item {
+                return item
+            }
+        }
+
+        return await fetchDeezerArtistFallback(name: cleanName)
+    }
+
+    private static func fetchDeezerArtistFallback(name: String) async -> ArtistProfileData.Item? {
+        guard let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let searchUrl = URL(string: "https://api.deezer.com/search/artist?q=\(encoded)&limit=1") else { return nil }
+
+        struct SearchResult: Decodable {
+            struct Artist: Decodable {
+                let id: Int
+                let name: String
+                let picture_xl: String?
+                let nb_fan: Int?
+            }
+            let data: [Artist]?
+        }
+
+        guard let (data, _) = try? await URLSession.shared.data(from: searchUrl),
+              let search = try? JSONDecoder().decode(SearchResult.self, from: data),
+              let found = search.data?.first else { return nil }
+
+        let artistId = found.id
+        async let topTask = fetchDeezerArtistTopTracks(artistId: artistId, artistName: found.name)
+        async let albumsTask = fetchDeezerArtistAlbums(artistId: artistId)
+        async let relatedTask = fetchDeezerRelatedArtists(artistId: artistId)
+
+        let (top, discography, related) = await (topTask, albumsTask, relatedTask)
+
+        let artistItem = ArtistProfileData.ArtistItem(
+            spotifyId: nil,
+            name: found.name,
+            imageUrl: found.picture_xl,
+            spotifyUrl: nil,
+            genres: nil,
+            popularity: nil,
+            followers: found.nb_fan,
+            source: "deezer"
+        )
+
+        return ArtistProfileData.Item(
+            artist: artistItem,
+            topTracks: top,
+            discography: discography,
+            relatedArtists: related
+        )
+    }
+
+    private static func fetchDeezerArtistTopTracks(artistId: Int, artistName: String) async -> [ArtistProfileData.TrackItem] {
+        guard let url = URL(string: "https://api.deezer.com/artist/\(artistId)/top?limit=10") else { return [] }
+        struct TopResponse: Decodable {
+            struct Item: Decodable {
+                let id: Int
+                let title: String
+                let duration: Double
+                struct Album: Decodable {
+                    let title: String?
+                    let cover_xl: String?
+                    let cover_big: String?
+                }
+                let album: Album?
+            }
+            let data: [Item]?
+        }
+        guard let (data, _) = try? await URLSession.shared.data(from: url),
+              let res = try? JSONDecoder().decode(TopResponse.self, from: data),
+              let items = res.data else { return [] }
+
+        return items.map {
+            ArtistProfileData.TrackItem(
+                id: "dz-\($0.id)",
+                title: $0.title,
+                artist: artistName,
+                album: $0.album?.title,
+                thumbnail: $0.album?.cover_xl ?? $0.album?.cover_big,
+                duration: $0.duration,
+                durationMs: $0.duration * 1000,
+                spotifyId: nil,
+                videoId: nil
+            )
+        }
+    }
+
+    private static func fetchDeezerArtistAlbums(artistId: Int) async -> ArtistProfileData.Discography {
+        guard let url = URL(string: "https://api.deezer.com/artist/\(artistId)/albums?limit=25") else {
+            return ArtistProfileData.Discography(popular: [], albums: [], singles: [])
+        }
+        struct AlbumsResponse: Decodable {
+            struct Item: Decodable {
+                let id: Int
+                let title: String
+                let cover_xl: String?
+                let release_date: String?
+                let record_type: String?
+            }
+            let data: [Item]?
+        }
+        guard let (data, _) = try? await URLSession.shared.data(from: url),
+              let res = try? JSONDecoder().decode(AlbumsResponse.self, from: data),
+              let items = res.data else {
+            return ArtistProfileData.Discography(popular: [], albums: [], singles: [])
+        }
+
+        let all = items.map {
+            ArtistProfileData.DiscographyItem(
+                name: $0.title,
+                imageUrl: $0.cover_xl,
+                releaseDate: $0.release_date,
+                type: $0.record_type == "single" ? "single" : "album",
+                group: $0.record_type,
+                spotifyId: nil,
+                deezerId: "\($0.id)"
+            )
+        }
+        let albums = all.filter { $0.type == "album" }
+        let singles = all.filter { $0.type == "single" }
+        return ArtistProfileData.Discography(popular: all, albums: albums, singles: singles)
+    }
+
+    private static func fetchDeezerRelatedArtists(artistId: Int) async -> [ArtistProfileData.RelatedArtist] {
+        guard let url = URL(string: "https://api.deezer.com/artist/\(artistId)/related?limit=8") else { return [] }
+        struct RelatedResponse: Decodable {
+            struct Item: Decodable {
+                let id: Int
+                let name: String
+                let picture_xl: String?
+                let nb_fan: Int?
+            }
+            let data: [Item]?
+        }
+        guard let (data, _) = try? await URLSession.shared.data(from: url),
+              let res = try? JSONDecoder().decode(RelatedResponse.self, from: data),
+              let items = res.data else { return [] }
+
+        return items.map {
+            ArtistProfileData.RelatedArtist(
+                spotifyId: nil,
+                name: $0.name,
+                imageUrl: $0.picture_xl,
+                followers: $0.nb_fan
+            )
+        }
+    }
+
+}

@@ -6,6 +6,7 @@ struct MainView: View {
     @EnvironmentObject private var library: LibraryStore
     @EnvironmentObject private var player: AudioPlayer
     @EnvironmentObject private var downloads: DownloadManager
+    @EnvironmentObject private var artistRouter: ArtistRouter
     @State private var tab: LibraryTab = .home
     @State private var showImport = false
     @State private var showPlayer = false
@@ -88,6 +89,7 @@ struct MainView: View {
             }
             .fullScreenCover(isPresented: $showPlayer) { PlayerView(onClose: { showPlayer = false }) }
             .sheet(isPresented: $showSettings) { SettingsView() }
+            .sheet(item: $artistRouter.selectedArtist) { artist in ArtistDetailView(artist: artist) }
         }
     }
 }
@@ -221,7 +223,12 @@ struct HomeView: View {
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 16) {
                     ForEach(taste.preferences.artists) { artist in
-                        ArtistAvatar(artist: artist)
+                        Button {
+                            artistRouter.open(artist: artist)
+                        } label: {
+                            ArtistAvatar(artist: artist)
+                        }
+                        .buttonStyle(PressStyle())
                     }
                 }.padding(.horizontal, 1).padding(.vertical, 5)
             }.scrollIndicators(.hidden)
@@ -357,6 +364,7 @@ private struct ArtistAvatar: View {
 
 private struct TrackShelf: View {
     @EnvironmentObject private var player: AudioPlayer
+    @EnvironmentObject private var artistRouter: ArtistRouter
     let tracks: [Track]
     let cardWidth: CGFloat
 
@@ -373,7 +381,12 @@ private struct TrackShelf: View {
                                     .padding(9).shadow(color: .black.opacity(0.25), radius: 8)
                             }
                             Text(track.title).font(.subheadline.bold()).foregroundStyle(.white).lineLimit(1)
-                            Text(track.artist).font(.caption).foregroundStyle(NW.muted).lineLimit(1)
+                            Button {
+                                artistRouter.open(name: track.artist)
+                            } label: {
+                                Text(track.artist).font(.caption).foregroundStyle(NW.muted).lineLimit(1)
+                            }
+                            .buttonStyle(.plain)
                         }.frame(width: cardWidth, alignment: .leading)
                     }.buttonStyle(PressStyle())
                 }

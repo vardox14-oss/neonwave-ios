@@ -5,6 +5,7 @@ struct TrackRow: View {
     @EnvironmentObject private var library: LibraryStore
     @EnvironmentObject private var player: AudioPlayer
     @EnvironmentObject private var downloads: DownloadManager
+    @EnvironmentObject private var artistRouter: ArtistRouter
     let track: Track
     var context: [Track] = []
     var playlist: Playlist? = nil
@@ -35,6 +36,9 @@ struct TrackRow: View {
                 IconButton(symbol: "arrow.down.circle", label: "Télécharger \(track.title)") { downloads.download(track) }.foregroundStyle(NW.blue)
             }
             Menu {
+                Button("Voir l’artiste « \(track.artist) »", systemImage: "person.crop.circle") {
+                    artistRouter.open(name: track.artist, spotifyId: track.spotifyId)
+                }
                 Button(library.snapshot.likedIDs.contains(track.id) ? "Retirer des favoris" : "Ajouter aux favoris", systemImage: "heart") { library.toggleLike(track) }
                 Button("Ajouter à la file", systemImage: "text.line.first.and.arrowtriangle.forward") { player.enqueue(track) }
                 if session.account != nil && track.remoteID == nil {
@@ -616,5 +620,471 @@ struct DownloadsView: View {
                 }
             }.padding(22).padding(.bottom, 120)
         }.scrollIndicators(.visible).scrollBounceBehavior(.always, axes: .vertical)
+    }
+}
+
+enum ArtistDiscographyTab: String, CaseIterable {
+    case popular = "Populaires"
+    case albums = "Albums"
+    case singles = "Singles & EP"
+}
+
+struct ArtistDetailView: View {
+    let artist: ArtistIdentifier
+    @EnvironmentObject private var player: AudioPlayer
+    @EnvironmentObject private var library: LibraryStore
+    @EnvironmentObject private var taste: MusicTasteStore
+    @EnvironmentObject private var downloads: DownloadManager
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var profile: MusicCatalogService.ArtistProfileData.Item?
+    @State private var loading = true
+    @State private var discographyTab: ArtistDiscographyTab = .popular
+    @State private var selectedAlbum: Album?
+    @State private var subArtist: ArtistIdentifier?
+
+    private var artistName: String { profile?.artist?.name ?? artist.name }
+    private var heroImageURL: String? { profile?.artist?.imageUrl ?? artist.imageUrl }
+    private var isFollowed: Bool { taste.isFollowed(artistName) }
+
+    private var topTracks: [Track] {
+        guard let list = profile?.topTracks else { return [] }
+        return list.map { item in
+            let dur = item.duration ?? ((item.durationMs ?? 0) / 1000)
+            let stableID = item.spotifyId.map { "sp-\($0)" } ?? item.id ?? UUID().uuidString
+            return Track(
+                id: stableID,
+                title: item.title,
+                artist: item.artist ?? artistName,
+                duration: dur,
+                album: item.album,
+                artworkURL: item.thumbnail ?? heroImageURL,
+                videoId: item.videoId,
+                spotifyId: item.spotifyId
+            )
+        }
+    }
+
+    private var currentDiscography: [MusicCatalogService.ArtistProfileData.DiscographyItem] {
+        guard let disco = profile?.discography else { return [] }
+        switch discographyTab {
+        case .popular: return disco.popular ?? disco.albums ?? []
+        case .albums: return disco.albums ?? []
+        case .singles: return disco.singles ?? []
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 24) {
+                    heroHeader
+                    actionRow
+
+                    if loading {
+                        ProgressView().tint(NW.blue).frame(height: 120)
+                    } else {
+                        if !topTracks.isEmpty {
+                            topTracksSection
+                        }
+
+                        if !(profile?.discography?.albums ?? []).isEmpty || !(profile?.discography?.singles ?? []).isEmpty || !(profile?.discography?.popular ?? []).isEmpty {
+                            discographySection
+                        }
+
+                        if let related = profile?.relatedArtists, !related.isEmpty {
+                            relatedArtistsSection(related)
+                        }
+
+                        aboutSection
+                    }
+                }
+                .padding(.bottom, 130)
+            }
+            .scrollIndicators(.visible)
+            .background(NW.background.ignoresSafeArea())
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(8)
+                            .background(.white.opacity(0.12), in: Circle())
+                    }
+                }
+                ToolbarItem(placement: .principal) {
+                    Text(artistName)
+                        .font(.headline.bold())
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        taste.toggleFollow(name: artistName, spotifyId: profile?.artist?.spotifyId ?? artist.spotifyId, imageUrl: heroImageURL)
+                    } label: {
+                        Image(systemName: isFollowed ? "heart.fill" : "heart")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(isFollowed ? .pink : .white)
+                            .padding(8)
+                            .background(.white.opacity(0.12), in: Circle())
+                    }
+                }
+            }
+            .task {
+                loading = true
+                profile = await MusicCatalogService.fetchArtistProfile(name: artist.name, spotifyId: artist.spotifyId)
+                loading = false
+            }
+            .sheet(item: $selectedAlbum) { album in
+                AlbumDetailView(album: album)
+            }
+            .sheet(item: $subArtist) { sub in
+                ArtistDetailView(artist: sub)
+            }
+        }
+    }
+
+    private var heroHeader: some View {
+        ZStack(alignment: .bottomLeading) {
+            if let heroImageURL, let url = URL(string: heroImageURL) {
+                AsyncImage(url: url) { phase in
+                    if case .success(let img) = phase {
+                        img.resizable().scaledToFill()
+                            .frame(maxWidth: .infinity, maxHeight: 310)
+                            .clipped()
+                            .overlay(
+                                LinearGradient(
+                                    colors: [.clear, NW.background.opacity(0.4), NW.background],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                    } else {
+                        heroFallback
+                    }
+                }
+            } else {
+                heroFallback
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .foregroundStyle(NW.blue)
+                        .font(.system(size: 14))
+                    Text("ARTISTE VÉRIFIÉ")
+                        .font(.system(size: 10, weight: .heavy))
+                        .tracking(1.4)
+                        .foregroundStyle(NW.blue)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(.ultraThinMaterial, in: Capsule())
+
+                Text(artistName)
+                    .font(.system(size: 34, weight: .black, design: .rounded))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .shadow(color: .black.opacity(0.6), radius: 8, y: 3)
+
+                if let followers = profile?.artist?.followers, followers > 0 {
+                    Text("\(formatFollowers(followers)) auditeurs")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.75))
+                }
+            }
+            .padding(.horizontal, 22)
+            .padding(.bottom, 16)
+        }
+        .frame(height: 310)
+    }
+
+    private var heroFallback: some View {
+        LinearGradient(colors: [NW.blue.opacity(0.7), NW.violet.opacity(0.5), NW.background], startPoint: .topLeading, endPoint: .bottomTrailing)
+            .frame(maxWidth: .infinity, maxHeight: 310)
+    }
+
+    private var actionRow: some View {
+        HStack(spacing: 12) {
+            Button {
+                if let first = topTracks.first {
+                    player.shuffle = false
+                    player.play(first, in: topTracks)
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 14, weight: .bold))
+                    Text("Écouter")
+                        .font(.subheadline.bold())
+                }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 13)
+                .background(LinearGradient(colors: [NW.blue, NW.violet], startPoint: .leading, endPoint: .trailing), in: Capsule())
+                .foregroundStyle(.white)
+                .shadow(color: NW.blue.opacity(0.35), radius: 10, y: 4)
+            }
+            .disabled(topTracks.isEmpty)
+
+            Button {
+                if let random = topTracks.randomElement() {
+                    player.shuffle = true
+                    player.play(random, in: topTracks)
+                }
+            } label: {
+                Image(systemName: "shuffle")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(13)
+                    .background(.white.opacity(0.12), in: Circle())
+            }
+            .disabled(topTracks.isEmpty)
+
+            Button {
+                taste.toggleFollow(name: artistName, spotifyId: profile?.artist?.spotifyId ?? artist.spotifyId, imageUrl: heroImageURL)
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: isFollowed ? "checkmark" : "plus")
+                        .font(.system(size: 12, weight: .bold))
+                    Text(isFollowed ? "Abonné" : "S’abonner")
+                        .font(.caption.bold())
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 11)
+                .background(isFollowed ? Color.white.opacity(0.14) : Color.clear, in: Capsule())
+                .overlay(Capsule().stroke(Color.white.opacity(0.3), lineWidth: 1))
+                .foregroundStyle(.white)
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 22)
+    }
+
+    private var topTracksSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            SectionHeading(title: "Titres populaires", eyebrow: "CLASSEMENT")
+                .padding(.horizontal, 22)
+
+            LazyVStack(spacing: 2) {
+                ForEach(Array(topTracks.prefix(10).enumerated()), id: \.element.id) { index, track in
+                    HStack(spacing: 12) {
+                        Text("\(index + 1)")
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .foregroundStyle(index < 3 ? NW.blue : NW.muted)
+                            .frame(width: 22, alignment: .trailing)
+
+                        CoverArt(track: track, remoteURL: track.artworkURL, radius: 10)
+                            .frame(width: 46, height: 46)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(track.title)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(player.current?.id == track.id ? NW.blue : .white)
+                                .lineLimit(1)
+                            Text(track.artist)
+                                .font(.caption)
+                                .foregroundStyle(NW.muted)
+                                .lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                        Text(track.duration.clockTime)
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(NW.muted)
+
+                        Button {
+                            if player.current?.id == track.id {
+                                if player.isPlaying { player.pause() } else { player.resume() }
+                            } else {
+                                player.play(track, in: topTracks)
+                            }
+                        } label: {
+                            Image(systemName: player.current?.id == track.id && player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                                .font(.title3)
+                                .foregroundStyle(player.current?.id == track.id ? NW.blue : .white.opacity(0.7))
+                        }
+                        .padding(.leading, 4)
+                    }
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        player.play(track, in: topTracks)
+                    }
+                }
+            }
+        }
+    }
+
+    private var discographySection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            SectionHeading(title: "Discographie", eyebrow: "SORTIES")
+                .padding(.horizontal, 22)
+
+            Picker("Discographie", selection: $discographyTab) {
+                ForEach(ArtistDiscographyTab.allCases, id: \.self) { tab in
+                    Text(tab.rawValue).tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 22)
+
+            if currentDiscography.isEmpty {
+                Text("Aucune sortie dans cette catégorie.")
+                    .font(.caption)
+                    .foregroundStyle(NW.muted)
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 12)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(spacing: 14) {
+                        ForEach(currentDiscography) { item in
+                            Button {
+                                selectedAlbum = Album(
+                                    id: item.deezerId ?? item.spotifyId ?? UUID().uuidString,
+                                    title: item.name,
+                                    artist: artistName,
+                                    coverURL: item.imageUrl,
+                                    releaseDate: item.releaseDate
+                                )
+                            } label: {
+                                VStack(alignment: .leading, spacing: 7) {
+                                    CoverArt(remoteURL: item.imageUrl, radius: 14)
+                                        .frame(width: 135, height: 135)
+                                    Text(item.name)
+                                        .font(.subheadline.bold())
+                                        .foregroundStyle(.white)
+                                        .lineLimit(1)
+                                    HStack(spacing: 6) {
+                                        if let year = item.releaseDate?.prefix(4) {
+                                            Text(String(year))
+                                                .font(.caption2)
+                                                .foregroundStyle(NW.muted)
+                                        }
+                                        Text("•")
+                                            .font(.caption2)
+                                            .foregroundStyle(NW.muted)
+                                        Text(item.type == "single" ? "Single" : "Album")
+                                            .font(.caption2.bold())
+                                            .foregroundStyle(NW.blue)
+                                    }
+                                }
+                                .frame(width: 135, alignment: .leading)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 4)
+                }
+            }
+        }
+    }
+
+    private func relatedArtistsSection(_ list: [MusicCatalogService.ArtistProfileData.RelatedArtist]) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            SectionHeading(title: "Les fans aiment aussi", eyebrow: "SIMILAIRES")
+                .padding(.horizontal, 22)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 16) {
+                    ForEach(list) { rel in
+                        Button {
+                            subArtist = ArtistIdentifier(name: rel.name, spotifyId: rel.spotifyId, imageUrl: rel.imageUrl)
+                        } label: {
+                            VStack(spacing: 8) {
+                                ZStack {
+                                    Circle().fill(LinearGradient(colors: [NW.blue, NW.violet], startPoint: .topLeading, endPoint: .bottomTrailing))
+                                    if let img = rel.imageUrl, let url = URL(string: img) {
+                                        AsyncImage(url: url) { phase in
+                                            if case .success(let image) = phase {
+                                                image.resizable().scaledToFill()
+                                            } else {
+                                                Text(String(rel.name.prefix(1))).font(.title3.bold())
+                                            }
+                                        }
+                                        .clipShape(Circle())
+                                    } else {
+                                        Text(String(rel.name.prefix(1))).font(.title3.bold())
+                                    }
+                                    Circle().stroke(.white.opacity(0.2), lineWidth: 1)
+                                }
+                                .frame(width: 80, height: 80)
+                                .shadow(color: NW.blue.opacity(0.2), radius: 8, y: 4)
+
+                                Text(rel.name)
+                                    .font(.caption.bold())
+                                    .foregroundStyle(.white)
+                                    .lineLimit(1)
+                                    .frame(width: 84)
+
+                                if let f = rel.followers, f > 0 {
+                                    Text("\(formatFollowers(f))")
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(NW.muted)
+                                        .lineLimit(1)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 22)
+                .padding(.vertical, 4)
+            }
+        }
+    }
+
+    private var aboutSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeading(title: "À propos", eyebrow: "DÉTAILS")
+                .padding(.horizontal, 22)
+
+            HStack(spacing: 12) {
+                if let followers = profile?.artist?.followers, followers > 0 {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("AUDITEURS")
+                            .font(.system(size: 9, weight: .bold))
+                            .tracking(1.4)
+                            .foregroundStyle(NW.muted)
+                        Text(formatFollowers(followers))
+                            .font(.title3.bold())
+                            .foregroundStyle(.white)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+                    .premiumPanel(radius: 16)
+                }
+
+                if let genres = profile?.artist?.genres, !genres.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("GENRES")
+                            .font(.system(size: 9, weight: .bold))
+                            .tracking(1.4)
+                            .foregroundStyle(NW.muted)
+                        Text(genres.prefix(2).joined(separator: ", "))
+                            .font(.subheadline.bold())
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+                    .premiumPanel(radius: 16)
+                }
+            }
+            .padding(.horizontal, 22)
+        }
+    }
+
+    private func formatFollowers(_ n: Int) -> String {
+        if n >= 1_000_000 {
+            return String(format: "%.1f M", Double(n) / 1_000_000).replacingOccurrences(of: ".0", with: "")
+        } else if n >= 1_000 {
+            return String(format: "%.0f k", Double(n) / 1_000)
+        }
+        return "\(n)"
     }
 }

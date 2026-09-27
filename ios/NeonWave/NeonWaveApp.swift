@@ -26,6 +26,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     @StateObject private var player = AudioPlayer()
     @StateObject private var downloads = DownloadManager.shared
     @StateObject private var taste = MusicTasteStore()
+    @StateObject private var artistRouter = ArtistRouter()
     var body: some Scene {
         WindowGroup {
             Group {
@@ -42,7 +43,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
                     MainView()
                 }
             }
-            .environmentObject(session).environmentObject(library).environmentObject(player).environmentObject(downloads).environmentObject(taste)
+            .environmentObject(session).environmentObject(library).environmentObject(player).environmentObject(downloads).environmentObject(taste).environmentObject(artistRouter)
             .preferredColorScheme(.dark).tint(NW.blue)
             .task(id: session.storageID) {
                 player.stop(); library.activate(session.storageID); player.connect(library); downloads.connect(library); await taste.activate(session.storageID)

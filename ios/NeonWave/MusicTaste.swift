@@ -60,6 +60,38 @@ import SwiftUI
         return true
     }
 
+    func isFollowed(_ artistName: String) -> Bool {
+        preferences.followedArtists.contains { $0.name.caseInsensitiveCompare(artistName) == .orderedSame }
+    }
+
+    func toggleFollow(name: String, spotifyId: String? = nil, imageUrl: String? = nil) {
+        if isFollowed(name) {
+            preferences.followedArtists.removeAll { $0.name.caseInsensitiveCompare(name) == .orderedSame }
+        } else {
+            let choice = ArtistChoice(spotifyId: spotifyId ?? "", name: name, imageUrl: imageUrl ?? "")
+            preferences.followedArtists.append(choice)
+        }
+        persist()
+        if AppConfiguration.apiURL != nil {
+            Task {
+                let body: [String: Any] = [
+                    "genres": preferences.genres,
+                    "artists": preferences.artists.map { [
+                        "spotifyId": $0.spotifyId, "name": $0.name, "imageUrl": $0.imageUrl,
+                        "spotifyUrl": $0.spotifyUrl, "genres": $0.genres, "popularity": $0.popularity,
+                        "followers": $0.followers, "source": $0.source
+                    ]},
+                    "followedArtists": preferences.followedArtists.map { [
+                        "spotifyId": $0.spotifyId, "name": $0.name, "imageUrl": $0.imageUrl,
+                        "spotifyUrl": $0.spotifyUrl, "genres": $0.genres, "popularity": $0.popularity,
+                        "followers": $0.followers, "source": $0.source
+                    ]}
+                ]
+                _ = try? await APIClient().call("api/user/music-preferences", method: "POST", body: body)
+            }
+        }
+    }
+
     func loadRecommendations() {
         recommendationTask?.cancel()
         let artists = preferences.artists
@@ -289,5 +321,32 @@ struct TasteOnboardingView: View {
         guard !values.isEmpty else { return }
         featuredArtists = values
         if query.trimmingCharacters(in: .whitespacesAndNewlines).count < 2 { suggestions = values }
+    }
+}
+
+struct ArtistIdentifier: Identifiable, Hashable {
+    var id: String { spotifyId.map { "sp-\($0)" } ?? name.lowercased() }
+    let name: String
+    let spotifyId: String?
+    let imageUrl: String?
+
+    init(name: String, spotifyId: String? = nil, imageUrl: String? = nil) {
+        self.name = name
+        self.spotifyId = spotifyId
+        self.imageUrl = imageUrl
+    }
+}
+
+@MainActor final class ArtistRouter: ObservableObject {
+    @Published var selectedArtist: ArtistIdentifier?
+
+    func open(name: String, spotifyId: String? = nil, imageUrl: String? = nil) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        selectedArtist = ArtistIdentifier(name: trimmed, spotifyId: spotifyId, imageUrl: imageUrl)
+    }
+
+    func open(artist: ArtistChoice) {
+        open(name: artist.name, spotifyId: artist.spotifyId.isEmpty ? nil : artist.spotifyId, imageUrl: artist.imageUrl.isEmpty ? nil : artist.imageUrl)
     }
 }
