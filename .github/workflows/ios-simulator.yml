@@ -91,7 +91,7 @@ jobs:
           xcodebuild \
             -project ios/NeonWave.xcodeproj \
             -scheme NeonWave \
-            -configuration Debug \
+            -configuration Release \
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -derivedDataPath ios/DerivedData-Device \
@@ -100,7 +100,7 @@ jobs:
             NEONWAVE_API_URL=https://fifty-singers-tan.loca.lt \
             build 2>&1 | tee ios/build/xcodebuild-device.log
 
-          DEVICE_APP=ios/DerivedData-Device/Build/Products/Debug-iphoneos/NeonWave.app
+          DEVICE_APP=ios/DerivedData-Device/Build/Products/Release-iphoneos/NeonWave.app
           test -d "$DEVICE_APP"
           rm -rf ios/build/Payload
           mkdir -p ios/build/Payload

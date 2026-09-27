@@ -25,7 +25,6 @@ final class YouTubePlayer: NSObject, ObservableObject, WKScriptMessageHandler, W
 
     override init() {
         super.init()
-        _ = webView
     }
 
     private func setupWebView() {

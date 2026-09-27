@@ -84,7 +84,7 @@ private final class SilentAudioKeepAlive {
     @Published private(set) var lyricsOffset: Double = 0
 
     private let player = AVPlayer()
-    private let appleMusicPlayer = ApplicationMusicPlayer.shared
+    private lazy var appleMusicPlayer = ApplicationMusicPlayer.shared
     private var isAppleMusicActive = false
     private var isYouTubeActive = false
     private var resolveTask: Task<Void, Never>?
