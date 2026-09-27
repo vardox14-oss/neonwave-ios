@@ -13,13 +13,13 @@ struct MainView: View {
 
     var body: some View {
         ZStack {
-            PremiumBackdrop(accent: tab == .downloads ? NW.cyan : NW.violet)
-
             YouTubePlayerWebView()
-                .frame(width: 1, height: 1)
-                .opacity(0.001)
+                .frame(width: 320, height: 240)
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
+                .zIndex(-100)
+
+            PremiumBackdrop(accent: tab == .downloads ? NW.cyan : NW.violet)
 
             NavigationStack {
                 Group {
