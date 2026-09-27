@@ -94,7 +94,21 @@ struct PlayerView: View {
         .gesture(
             DragGesture(minimumDistance: 25)
                 .onEnded { value in
-                    if value.translation.height > 60 && abs(value.translation.width) < 120 {
+                    let horizontal = value.translation.width
+                    let vertical = value.translation.height
+
+                    // Horizontal swipe: next / previous track in cover mode
+                    if mode == .cover && abs(horizontal) > 55 && abs(vertical) < 65 {
+                        if horizontal < 0 {
+                            player.next()
+                            library.haptic()
+                        } else {
+                            player.previous()
+                            library.haptic()
+                        }
+                    }
+                    // Vertical drag down: dismiss player
+                    else if vertical > 65 && abs(horizontal) < 110 {
                         onClose?()
                         dismiss()
                     }

@@ -63,6 +63,8 @@ final class YouTubePlayer: NSObject, ObservableObject, WKScriptMessageHandler, W
         <script>
         var player;
         var progressTimer;
+        var lastPlayRequestTime = 0;
+        var userRequestedPause = false;
         function onYouTubeIframeAPIReady() {
             player = new YT.Player('player', {
                 width: '100%',
@@ -75,7 +77,7 @@ final class YouTubePlayer: NSObject, ObservableObject, WKScriptMessageHandler, W
                     'fs': 0,
                     'modestbranding': 1,
                     'rel': 0,
-                    'origin': 'https://www.youtube-nocookie.com'
+                    'origin': 'https://www.youtube.com'
                 },
                 events: {
                     'onReady': onPlayerReady,
@@ -103,6 +105,18 @@ final class YouTubePlayer: NSObject, ObservableObject, WKScriptMessageHandler, W
                 type: 'state',
                 state: event.data
             });
+            // If the video pauses right after starting without user input (common on Topic tracks and WebKit autoplay policy), auto-resume
+            if (event.data === 2 && !userRequestedPause && (Date.now() - lastPlayRequestTime) < 2500) {
+                setTimeout(function() {
+                    try {
+                        if (player && !userRequestedPause) {
+                            if (player.unMute) player.unMute();
+                            if (player.setVolume) player.setVolume(100);
+                            if (player.playVideo) player.playVideo();
+                        }
+                    } catch(e) {}
+                }, 120);
+            }
         }
         function onPlayerError(event) {
             window.webkit.messageHandlers.neonwaveBridge.postMessage({
@@ -111,6 +125,8 @@ final class YouTubePlayer: NSObject, ObservableObject, WKScriptMessageHandler, W
             });
         }
         function playVideoId(id) {
+            lastPlayRequestTime = Date.now();
+            userRequestedPause = false;
             if (player && typeof player.loadVideoById === 'function') {
                 try {
                     if (player.unMute) player.unMute();
@@ -125,7 +141,7 @@ final class YouTubePlayer: NSObject, ObservableObject, WKScriptMessageHandler, W
                     try {
                         if (player && player.unMute) player.unMute();
                         if (player && player.setVolume) player.setVolume(100);
-                        if (player && player.playVideo) player.playVideo();
+                        if (player && player.playVideo && !userRequestedPause) player.playVideo();
                     } catch(e) {}
                 }, 300);
             } else {
@@ -133,17 +149,22 @@ final class YouTubePlayer: NSObject, ObservableObject, WKScriptMessageHandler, W
             }
         }
         function resume() {
+            userRequestedPause = false;
+            lastPlayRequestTime = Date.now();
             if (player && player.unMute) player.unMute();
             if (player && player.setVolume) player.setVolume(100);
             if (player && player.playVideo) player.playVideo();
         }
-        function pause() { if (player && player.pauseVideo) player.pauseVideo(); }
+        function pause() {
+            userRequestedPause = true;
+            if (player && player.pauseVideo) player.pauseVideo();
+        }
         function seek(sec) { if (player && player.seekTo) player.seekTo(sec, true); }
         </script>
         </body>
         </html>
         """
-        webView.loadHTMLString(html, baseURL: URL(string: "https://www.youtube-nocookie.com"))
+        webView.loadHTMLString(html, baseURL: URL(string: "https://www.youtube.com"))
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {

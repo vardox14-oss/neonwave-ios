@@ -163,10 +163,24 @@ private final class SilentAudioKeepAlive {
         }
 
         let commands = MPRemoteCommandCenter.shared()
+        commands.playCommand.isEnabled = true
         commands.playCommand.addTarget { [weak self] _ in Task { @MainActor in self?.resume() }; return .success }
+        commands.pauseCommand.isEnabled = true
         commands.pauseCommand.addTarget { [weak self] _ in Task { @MainActor in self?.pause() }; return .success }
+        commands.togglePlayPauseCommand.isEnabled = true
+        commands.togglePlayPauseCommand.addTarget { [weak self] _ in Task { @MainActor in self?.toggle() }; return .success }
+        commands.nextTrackCommand.isEnabled = true
         commands.nextTrackCommand.addTarget { [weak self] _ in Task { @MainActor in self?.next() }; return .success }
+        commands.previousTrackCommand.isEnabled = true
         commands.previousTrackCommand.addTarget { [weak self] _ in Task { @MainActor in self?.previous() }; return .success }
+
+        // Disable 15s skip/seek commands so iOS Control Center & Lock Screen show Previous / Next Track (|<< and >>|) instead of +15s/-15s video buttons
+        commands.skipForwardCommand.isEnabled = false
+        commands.skipBackwardCommand.isEnabled = false
+        commands.seekForwardCommand.isEnabled = false
+        commands.seekBackwardCommand.isEnabled = false
+
+        commands.changePlaybackPositionCommand.isEnabled = true
         commands.changePlaybackPositionCommand.addTarget { [weak self] event in
             guard let event = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
             Task { @MainActor in self?.seek(event.positionTime) }; return .success
@@ -214,15 +228,31 @@ private final class SilentAudioKeepAlive {
             }
         }
 
-        YouTubePlayer.shared.onError = { [weak self] _ in
+        YouTubePlayer.shared.onError = { [weak self] code in
             Task { @MainActor in
                 guard let self, self.isYouTubeActive, let cur = self.current else { return }
                 self.bufferingWatchdogTask?.cancel()
-                if let stream = cur.streamURL, let url = URL(string: stream) {
-                    self.startAVPlayerFallback(url: url)
-                } else {
-                    self.error = "Erreur lors de la lecture du titre."
-                    self.pause()
+                // If Topic track is blocked by YouTube embed rules (Error 101 or 150), fallback to alternative non-blocked video
+                Task {
+                    if let altVid = await MusicCatalogService.resolveAlternativeYouTubeId(title: cur.title, artist: cur.artist, excludeVideoId: cur.videoId ?? "") {
+                        await MainActor.run {
+                            guard self.current?.id == cur.id else { return }
+                            if self.queue.indices.contains(self.index) {
+                                self.queue[self.index].videoId = altVid
+                                self.current = self.queue[self.index]
+                            }
+                            self.startNativeOnlinePlayback(videoId: altVid, trackID: cur.id)
+                        }
+                    } else if let stream = cur.streamURL, let url = URL(string: stream) {
+                        await MainActor.run {
+                            self.startAVPlayerFallback(url: url)
+                        }
+                    } else {
+                        await MainActor.run {
+                            self.error = "Erreur lors de la lecture du titre."
+                            self.pause()
+                        }
+                    }
                 }
             }
         }
@@ -697,6 +727,9 @@ private final class SilentAudioKeepAlive {
         info[MPMediaItemPropertyPlaybackDuration] = duration
         info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = elapsed
         info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
+        info[MPNowPlayingInfoPropertyMediaType] = MPNowPlayingInfoMediaType.audio.rawValue
+        info[MPNowPlayingInfoPropertyPlaybackQueueIndex] = index
+        info[MPNowPlayingInfoPropertyPlaybackQueueCount] = max(1, queue.count)
         if includeArtwork {
             info.removeValue(forKey: MPMediaItemPropertyArtwork)
             if let local = library?.artworkURL(current), let image = UIImage(contentsOfFile: local.path) {

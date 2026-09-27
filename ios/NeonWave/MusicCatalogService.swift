@@ -344,8 +344,9 @@ enum MusicCatalogService {
         return nil
     }
 
-    static func bestYouTubeCandidate(_ candidates: [YouTubeCandidate], title: String, artist: String, duration: Double) -> YouTubeCandidate? {
-        candidates.max { youtubeScore($0, title: title, artist: artist, duration: duration) < youtubeScore($1, title: title, artist: artist, duration: duration) }
+    static func bestYouTubeCandidate(_ candidates: [YouTubeCandidate], title: String, artist: String, duration: Double, excludeVideoId: String? = nil) -> YouTubeCandidate? {
+        let list = candidates.filter { $0.videoId != excludeVideoId }
+        return list.max { youtubeScore($0, title: title, artist: artist, duration: duration) < youtubeScore($1, title: title, artist: artist, duration: duration) }
     }
 
     private static func youtubeScore(_ candidate: YouTubeCandidate, title: String, artist: String, duration: Double) -> Double {
@@ -360,19 +361,54 @@ enum MusicCatalogService {
         if candidateTitle.contains(wantedTitle) { score += 80 }
         if !wantedTokens.isEmpty { score += 60 * Double(wantedTokens.intersection(candidateTokens).count) / Double(wantedTokens.count) }
         if combined.contains(wantedArtist) { score += 55 }
-        if combined.contains("official audio") || combined.contains("audio officiel") { score += 35 }
-        if candidateChannel.contains("topic") { score += 24 }
+        if combined.contains("official audio") || combined.contains("audio officiel") { score += 40 }
+        if candidateChannel.contains("topic") { score += 15 }
         if combined.contains("official") || combined.contains("officiel") { score += 12 }
         let requestedSpecialTerms = ["live", "remix", "sped up", "slowed", "nightcore", "karaoke", "cover"]
-        for term in requestedSpecialTerms where candidateTitle.contains(term) && !wantedTitle.contains(term) { score -= 65 }
+        for term in requestedSpecialTerms where candidateTitle.contains(term) && !wantedTitle.contains(term) { score -= 85 }
+
         if duration > 0, let candidateDuration = candidate.duration {
             let delta = abs(duration - candidateDuration)
-            if delta <= 2 { score += 65 }
-            else if delta <= 5 { score += 48 }
-            else if delta <= 12 { score += 24 }
-            else if delta > 30 { score -= min(90, delta) }
+            if delta <= 3 { score += 95 }
+            else if delta <= 8 { score += 60 }
+            else if delta <= 14 { score += 25 }
+            else if delta > 40 { score -= 450 } // Reject 5m music video clip for 3m track
+            else if delta > 25 { score -= 180 }
+            else if delta > 15 { score -= 50 }
+        }
+
+        let clipTerms = ["clip", "court metrage", "official video", "music video", "film"]
+        if let candidateDuration = candidate.duration, duration > 0, abs(duration - candidateDuration) > 15 {
+            for term in clipTerms where combined.contains(term) {
+                score -= 160
+            }
         }
         return score
+    }
+
+    static func resolveAlternativeYouTubeId(title: String, artist: String, excludeVideoId: String) async -> String? {
+        let cleanTitle = title
+            .replacingOccurrences(of: "(feat.", with: "")
+            .replacingOccurrences(of: "(ft.", with: "")
+            .replacingOccurrences(of: "feat.", with: "")
+            .replacingOccurrences(of: "ft.", with: "")
+        let query = "\(artist) \(cleanTitle) lyrics paroles".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        guard let url = URL(string: "https://www.youtube.com/results?search_query=\(query)") else { return nil }
+
+        var request = URLRequest(url: url)
+        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
+        request.setValue("SOCS=CAESEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg; CONSENT=YES+", forHTTPHeaderField: "Cookie")
+        request.setValue("fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7", forHTTPHeaderField: "Accept-Language")
+        request.timeoutInterval = 6
+
+        if let (data, _) = try? await URLSession.shared.data(for: request),
+           let html = String(data: data, encoding: .utf8) {
+            let candidates = parseYouTubeCandidates(html).filter { $0.videoId != excludeVideoId && !$0.channel.lowercased().contains("topic") }
+            if let best = candidates.first {
+                return best.videoId
+            }
+        }
+        return nil
     }
 
     static func parseYouTubeCandidates(_ html: String) -> [YouTubeCandidate] {
