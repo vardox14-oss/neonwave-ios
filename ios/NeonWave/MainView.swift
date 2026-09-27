@@ -64,7 +64,7 @@ struct MainView: View {
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
-            .fullScreenCover(isPresented: $showPlayer) { PlayerView() }
+            .fullScreenCover(isPresented: $showPlayer) { PlayerView(onClose: { showPlayer = false }) }
             .sheet(isPresented: $showSettings) { SettingsView() }
         }
     }

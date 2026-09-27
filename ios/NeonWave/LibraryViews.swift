@@ -117,7 +117,7 @@ struct TrackCollectionView: View {
             }.padding(22)
         }.background(PremiumBackdrop()).navigationBarTitleDisplayMode(.inline)
             .safeAreaInset(edge: .bottom) { if player.current != nil { MiniPlayer { showPlayer = true }.padding(12).background(.ultraThinMaterial) } }
-            .fullScreenCover(isPresented: $showPlayer) { PlayerView() }
+            .fullScreenCover(isPresented: $showPlayer) { PlayerView(onClose: { showPlayer = false }) }
             .toolbar {
                 if let playlist {
                     ToolbarItem(placement: .topBarTrailing) {

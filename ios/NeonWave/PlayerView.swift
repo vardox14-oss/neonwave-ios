@@ -37,6 +37,7 @@ struct MiniPlayer: View {
 }
 
 struct PlayerView: View {
+    var onClose: (() -> Void)? = nil
     @EnvironmentObject private var player: AudioPlayer
     @EnvironmentObject private var library: LibraryStore
     @Environment(\.dismiss) private var dismiss
@@ -51,12 +52,13 @@ struct PlayerView: View {
 
     var body: some View {
         GeometryReader { geo in
+            let topInset = max(56, geo.safeAreaInsets.top + 6)
             ZStack {
                 immersiveBackground(size: geo.size)
                 if let track = player.current {
                     VStack(spacing: 0) {
                         header(track)
-                            .padding(.top, max(10, geo.safeAreaInsets.top))
+                            .padding(.top, topInset)
                         modeSelector
                             .padding(.top, 4)
 
@@ -87,6 +89,15 @@ struct PlayerView: View {
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
+        .gesture(
+            DragGesture(minimumDistance: 25)
+                .onEnded { value in
+                    if value.translation.height > 60 && abs(value.translation.width) < 120 {
+                        onClose?()
+                        dismiss()
+                    }
+                }
+        )
         .ignoresSafeArea()
         .sheet(isPresented: $showQueue) { QueueView() }
         .confirmationDialog("Minuterie de sommeil", isPresented: $showTimer, titleVisibility: .visible) {
@@ -160,7 +171,10 @@ struct PlayerView: View {
 
     private func header(_ track: Track) -> some View {
         HStack {
-            glassIcon("chevron.down", label: "Réduire") { dismiss() }
+            glassIcon("chevron.down", label: "Réduire") {
+                onClose?()
+                dismiss()
+            }
             Spacer()
             VStack(spacing: 3) {
                 Text("À L’ÉCOUTE")
@@ -362,8 +376,16 @@ struct PlayerView: View {
     }
 
     private func glassIcon(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Image(systemName: symbol).font(.system(size: 16, weight: .semibold)).frame(width: 42, height: 42).background(.white.opacity(0.07), in: Circle()) }
-            .buttonStyle(PressStyle()).accessibilityLabel(label)
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 17, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(.white.opacity(0.14), in: Circle())
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityLabel(label)
     }
 }
 
