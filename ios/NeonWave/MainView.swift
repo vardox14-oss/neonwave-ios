@@ -156,6 +156,7 @@ struct HomeView: View {
     @EnvironmentObject private var library: LibraryStore
     @EnvironmentObject private var player: AudioPlayer
     @EnvironmentObject private var taste: MusicTasteStore
+    @EnvironmentObject private var artistRouter: ArtistRouter
     let importFiles: () -> Void
 
     private var greeting: String {

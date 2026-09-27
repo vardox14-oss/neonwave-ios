@@ -87,7 +87,7 @@ import SwiftUI
                         "followers": $0.followers, "source": $0.source
                     ]}
                 ]
-                _ = try? await APIClient().call("api/user/music-preferences", method: "POST", body: body)
+                let _: MusicPreferences? = try? await APIClient().call("api/user/music-preferences", method: "POST", body: body)
             }
         }
     }
