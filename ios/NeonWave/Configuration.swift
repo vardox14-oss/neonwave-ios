@@ -11,7 +11,7 @@ enum AppConfiguration {
            !host.hasSuffix(".example"), !value.contains("$(") {
             return url
         }
-        return URL(string: "https://easier-turbo-referred-component.trycloudflare.com")
+        return URL(string: "https://51.77.159.172.sslip.io")
     }
     static func publicURL(_ key: String) -> URL? {
         guard let value = Bundle.main.object(forInfoDictionaryKey: key) as? String,
