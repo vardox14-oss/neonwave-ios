@@ -657,6 +657,7 @@ private struct SpicyLyricLine: View {
     }
 
     // ─── MODE 1 : VAGUE WATER & PHYSIQUE PAR SYLLABE (Syllable Mode) ─────────
+    // ─── MODE 1 : VAGUE WATER & PHYSIQUE PAR LETTRE (Syllable Wave Mode) ─────
     @ViewBuilder
     private var syllableWaveView: some View {
         if !isActive {
@@ -668,30 +669,40 @@ private struct SpicyLyricLine: View {
                 .foregroundStyle(Color.white.opacity(textOpacity))
         } else {
             let words = line.text.components(separatedBy: " ")
-            let totalWords = max(1, words.count)
-            let wordWindow = 1.0 / Double(totalWords)
+            let offsets: [Int] = {
+                var res: [Int] = []
+                var count = 0
+                for w in words {
+                    res.append(count)
+                    count += w.count + 1
+                }
+                return res
+            }()
+            let totalLineChars = max(1, (offsets.last ?? 0) + (words.last?.count ?? 0))
+            // Progression continue et fluide de la crête de vague sur toute la phrase
+            let waveCenter = progress * Double(totalLineChars)
+            // Rayon large de la vague (3.2 lettres = ~6.4 lettres soulevées simultanément)
+            let waveRadius = 3.2
 
             FlowLayout(spacing: 7, lineSpacing: 7) {
                 ForEach(0..<words.count, id: \.self) { wordIndex in
                     let wordText = words[wordIndex]
-                    let wordStart = Double(wordIndex) * wordWindow
-                    let wordEnd = wordStart + wordWindow
-                    let isWordActive = progress >= wordStart && progress < wordEnd
-                    let isWordSung = progress >= wordEnd
-
+                    let wordOffset = offsets[wordIndex]
                     let chars = Array(wordText)
-                    let totalChars = max(1, chars.count)
-                    let activeCharIndex = isWordActive ? Int(((progress - wordStart) / wordWindow) * Double(totalChars)) : -1
 
                     HStack(spacing: 0) {
                         ForEach(0..<chars.count, id: \.self) { charIndex in
                             let ch = String(chars[charIndex])
-                            let charDistance = activeCharIndex >= 0 ? abs(charIndex - activeCharIndex) : 99
-                            // Formule exacte Spicy Lyrics 6.1.1: 1 / (1 + distance^2.8)
-                            let falloff = activeCharIndex >= 0 ? max(0, 1.0 / (1.0 + pow(Double(charDistance), 2.8))) : 0.0
-                            let scale = isWordActive ? (0.95 + (1.175 - 0.95) * falloff) : (isWordSung ? 1.0 : 0.95)
-                            let yOffset = isWordActive ? (-0.018 * 42.0 * falloff) : 0.0
-                            let glow = isWordActive ? falloff : 0.0
+                            let globalPos = Double(wordOffset + charIndex)
+                            let dist = globalPos - waveCenter
+
+                            let inWave = abs(dist) <= waveRadius
+                            let waveFactor = inWave ? (0.5 * (1.0 + cos((dist / waveRadius) * .pi))) : 0.0
+                            let isPast = dist < -waveRadius
+
+                            let scale = inWave ? (0.98 + 0.17 * waveFactor) : (isPast ? 1.0 : 0.95)
+                            let yOffset = inWave ? (-6.0 * waveFactor) : 0.0
+                            let glow = inWave ? waveFactor : 0.0
 
                             Text(ch)
                                 .font(.system(size: 26, weight: .bold, design: .rounded))
@@ -699,10 +710,11 @@ private struct SpicyLyricLine: View {
                                 .scaleEffect(scale, anchor: .center)
                                 .offset(y: CGFloat(yOffset))
                                 .foregroundStyle(
-                                    isWordSung ? Color.white :
-                                    (isWordActive && charIndex <= activeCharIndex ? Color.white : Color.white.opacity(0.40))
+                                    isPast ? Color.white :
+                                    (inWave && dist <= 0.5 ? Color.white : Color.white.opacity(0.40 + 0.50 * waveFactor))
                                 )
-                                .shadow(color: Color.white.opacity(glow * 0.85), radius: CGFloat(4.0 + 12.0 * glow))
+                                .shadow(color: Color.white.opacity(glow * 0.90), radius: CGFloat(4.0 + 10.0 * glow))
+                                .animation(.smooth(duration: 0.16), value: progress)
                         }
                     }
                 }
@@ -764,7 +776,7 @@ private struct SpicyInstrumentalDots: View {
     let isActive: Bool
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 16) {
             ForEach(0..<3, id: \.self) { dotIdx in
                 let dotStart = Double(dotIdx) / 3.0
                 let dotEnd = Double(dotIdx + 1) / 3.0
@@ -773,24 +785,25 @@ private struct SpicyInstrumentalDots: View {
                 let dotProgress = isDotActive ? max(0, min(1.0, (progress - dotStart) / (dotEnd - dotStart))) : 0.0
 
                 let bounce = isDotActive ? sin(dotProgress * .pi) : 0.0
-                let scale: CGFloat = isDotActive ? CGFloat(0.75 + 0.30 * bounce) : (isDotSung ? 1.0 : 0.75)
-                let yOffset: CGFloat = isDotActive ? CGFloat(-6.0 * bounce) : 0.0
-                let opacity: Double = isDotSung ? 1.0 : (isDotActive ? (0.35 + 0.65 * bounce) : 0.35)
+                let scale: CGFloat = isDotActive ? CGFloat(0.85 + 0.40 * bounce) : (isDotSung ? 1.05 : 0.85)
+                let yOffset: CGFloat = isDotActive ? CGFloat(-7.0 * bounce) : 0.0
+                let opacity: Double = isActive ? (isDotSung ? 1.0 : (isDotActive ? (0.45 + 0.55 * bounce) : 0.40)) : 0.25
                 let glow: Double = isDotActive ? bounce : 0.0
 
                 Circle()
                     .fill(Color.white.opacity(opacity))
-                    .frame(width: 11, height: 11)
+                    .frame(width: 12, height: 12)
                     .scaleEffect(scale)
                     .offset(y: yOffset)
                     .shadow(color: Color.white.opacity(glow * 0.95), radius: CGFloat(4.0 + 8.0 * glow))
             }
         }
-        // Effondrement élastique (pre-hidden vanishing collapse)
-        .scaleEffect(progress > 0.92 ? max(0, (1.0 - progress) / 0.08) : 1.0)
-        .padding(.vertical, 10)
-        .padding(.horizontal, 14)
-        .animation(.spring(response: 0.35, dampingFraction: 0.60), value: progress)
+        // Effondrement élastique (pre-hidden vanishing collapse) à 90% de la fin de pause
+        .scaleEffect(progress > 0.90 ? max(0, (1.0 - progress) / 0.10) : 1.0)
+        .opacity(progress > 0.90 ? max(0, (1.0 - progress) / 0.10) : 1.0)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(.spring(response: 0.35, dampingFraction: 0.65), value: progress)
     }
 }
 
