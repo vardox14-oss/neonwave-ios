@@ -604,6 +604,11 @@ struct LyricsView: View {
 
 // ─── LIGNE DE PAROLE EXACT SPICY LYRICS 6.1.1 ──────────────────────────────
 private struct SpicyLyricLine: View {
+    private struct WordTiming {
+        let start: Double
+        let end: Double
+    }
+
     let line: LyricLine
     let distance: Int
     let isActive: Bool
@@ -673,11 +678,6 @@ private struct SpicyLyricLine: View {
             let words = line.text.components(separatedBy: " ").filter { !$0.isEmpty }
             let wordLengths = words.map { max(1, $0.count) }
             let totalWeight = Double(wordLengths.reduce(0, +))
-
-            struct WordTiming {
-                let start: Double
-                let end: Double
-            }
 
             // Répartition pondérée du temps de chant sur chaque mot
             let wordRanges: [WordTiming] = {
