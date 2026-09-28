@@ -32,7 +32,7 @@ enum LyricsService {
             }
             if let response: ServerLyricsResponse = try? await APIClient().call("api/music/lyrics", authenticated: false, queryItems: query) {
                 if let synced = response.syncedLyrics, !synced.isEmpty {
-                    let parsed = parseLRC(synced)
+                    let parsed = parseLRC(synced, insertInterludes: true)
                     if !parsed.isEmpty {
                         return LyricsResult(lines: parsed, plain: response.plainLyrics, sourceDuration: response.duration)
                     }
@@ -84,7 +84,7 @@ enum LyricsService {
                 return LyricsResult(lines: [], plain: nil, sourceDuration: nil)
             }
             if let synced = chosen.syncedLyrics, !synced.isEmpty {
-                let parsed = parseLRC(synced)
+                let parsed = parseLRC(synced, insertInterludes: true)
                 if !parsed.isEmpty {
                     return LyricsResult(lines: parsed, plain: chosen.plainLyrics, sourceDuration: chosen.duration)
                 }
@@ -166,7 +166,7 @@ enum LyricsService {
         return value
     }
 
-    static func parseLRC(_ lrc: String) -> [LyricLine] {
+    static func parseLRC(_ lrc: String, insertInterludes: Bool = false) -> [LyricLine] {
         let timePattern = #"\[(\d{1,3}):(\d{2}(?:\.\d{1,3})?)\]"#
         guard let regex = try? NSRegularExpression(pattern: timePattern) else { return [] }
         let offsetPattern = #"\[offset:([+-]?\d+)\]"#
@@ -195,6 +195,7 @@ enum LyricsService {
         }
         let sorted = result.sorted { $0.time < $1.time }
         guard !sorted.isEmpty else { return [] }
+        guard insertInterludes else { return sorted }
 
         // ─── INSERTION AUTOMATIQUE DES INTERMÈDES 3 POINTS (•••) ───────────
         // Détecte les silences et intros instrumentales pour afficher les 3 points rebondissants
