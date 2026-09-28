@@ -664,7 +664,7 @@ private struct SpicyLyricLine: View {
         .contentShape(Rectangle())
     }
 
-    // ─── MODE 1 : VAGUE WATER & PHYSIQUE PAR MOT (Syllable Wave Mode) ─────────
+    // ─── MODE 1 : VAGUE WATER & PHYSIQUE PAR MOT (Spicy Lyrics 6.1.1 exact splines) ─
     @ViewBuilder
     private var syllableWaveView: some View {
         if !isActive {
@@ -692,37 +692,68 @@ private struct SpicyLyricLine: View {
                 return res
             }()
 
-            // Index et progression continue du curseur sur la phrase
-            let activeWordIndex = words.indices.first(where: { progress >= wordRanges[$0].start && progress < wordRanges[$0].end }) ?? (progress >= 1.0 ? max(0, words.count - 1) : 0)
-            let currentRange = wordRanges.indices.contains(activeWordIndex) ? wordRanges[activeWordIndex] : WordTiming(start: 0.0, end: 1.0)
+            let activeWordIndex = words.indices.first(where: {
+                progress >= wordRanges[$0].start && progress < wordRanges[$0].end
+            }) ?? (progress >= 1.0 ? max(0, words.count - 1) : 0)
+            let currentRange = wordRanges.indices.contains(activeWordIndex)
+                ? wordRanges[activeWordIndex]
+                : WordTiming(start: 0.0, end: 1.0)
             let span = max(0.0001, currentRange.end - currentRange.start)
+            // wordProgress 0→1 pour le mot actif courant
             let wordProgress: Double = max(0.0, min(1.0, (progress - currentRange.start) / span))
             let continuousWordPos: Double = Double(activeWordIndex) + wordProgress
 
             FlowLayout(spacing: 7, lineSpacing: 7) {
                 ForEach(0..<words.count, id: \.self) { wordIndex in
                     let wordText = words[wordIndex]
-                    let distance = abs(Double(wordIndex) - continuousWordPos)
-
-                    // 1. Formule de proximité fluide Fraktality Spicy Lyrics 6.1.1
-                    let falloff = 1.0 / (1.0 + pow(distance * 1.5, 2.6))
-                    let glowFalloff = 1.0 / (1.0 + distance * 0.9)
-
                     let isCurrent = (wordIndex == activeWordIndex)
                     let isPast = (Double(wordIndex) < continuousWordPos - 0.45)
+                    let distance = abs(Double(wordIndex) - continuousWordPos)
 
-                    // 2. Ondulation physique Vague d'eau (Rebond vertical Y & Scale 1.0505)
-                    // ScaleSpline: 0.95 -> 1.0505 -> 1.0
-                    // YOffsetSpline: 0 -> -7.0pt -> 0
-                    let crestPulse = isCurrent ? sin(wordProgress * .pi) : 0.0
-                    let scale: CGFloat = isCurrent ? (1.0 + 0.065 * crestPulse) : (isPast ? 1.0 : (0.95 + 0.05 * CGFloat(falloff)))
-                    let yOffset: CGFloat = isCurrent ? (-7.0 * crestPulse) : (-6.0 * CGFloat(falloff))
+                    // ── Spicy 6.1.1 ScaleSpline (asymétrique): 0.95 → 1.0505 (pic 70%) → 1.0
+                    let scalePeak: Double = {
+                        let p = wordProgress
+                        if p < 0.7 { return 0.95 + 0.1005 * (p / 0.7) }
+                        else { return 1.0505 - 0.0505 * ((p - 0.7) / 0.3) }
+                    }()
 
-                    // 3. Halo volumétrique rayonnant (text-shadow diffuse)
-                    let glow: Double = isCurrent ? (0.65 + 0.35 * crestPulse) : (isPast ? 0.20 : (0.75 * glowFalloff))
+                    // ── Spicy 6.1.1 YOffsetSpline: 0.01em → -1/60em (pic 90%) → 0
+                    // em × 26pt = pixels. Positif = bas, négatif = haut (ascension).
+                    let yOffsetEm: Double = {
+                        let p = wordProgress
+                        let peak = -(1.0 / 60.0)  // ≈ -0.01667em
+                        if p < 0.9 { return 0.01 + (peak - 0.01) * (p / 0.9) }
+                        else { return peak * (1.0 - (p - 0.9) / 0.1) }
+                    }()
 
-                    // 4. Balayage lumineux en gradient simultané (-20% à 100%)
-                    let gradPos = isCurrent ? (-0.20 + 1.20 * wordProgress) : (isPast ? 1.0 : -0.20)
+                    // ── Spicy 6.1.1 GlowSpline: 0 → 1 (pic 15-60%) → 0
+                    let glowPeak: Double = {
+                        let p = wordProgress
+                        if p < 0.15 { return p / 0.15 }
+                        else if p < 0.6 { return 1.0 }
+                        else { return 1.0 - (p - 0.6) / 0.4 }
+                    }()
+
+                    // ── Falloff Fraktality (Spicy line 1084-1085)
+                    let falloff     = 1.0 / (1.0 + pow(distance, 2.8))
+                    let glowFalloff = 1.0 / (1.0 + distance * 0.9)
+
+                    let scale: CGFloat = isCurrent
+                        ? CGFloat(scalePeak)
+                        : (isPast ? 1.0 : CGFloat(0.95 + 0.1005 * falloff))
+
+                    // yOffset en points (DefaultLyricsSize = 26pt)
+                    let yOffset: CGFloat = isCurrent
+                        ? CGFloat(yOffsetEm * 26.0)
+                        : (isPast ? 0.0 : CGFloat(-(1.0/60.0) * 26.0 * falloff))
+
+                    let glow: Double = isCurrent
+                        ? glowPeak
+                        : (isPast ? 0.20 : glowFalloff * 0.65)
+
+                    // ── Gradient sweep: easeSinOut(p) = sin(p*π/2), -20%→100%
+                    let easedGrad: Double = isCurrent ? sin(wordProgress * .pi / 2.0) : 0.0
+                    let gradPos:   Double = isCurrent ? (-0.20 + 1.20 * easedGrad) : (isPast ? 1.0 : -0.20)
 
                     Text(wordText)
                         .font(.system(size: 26, weight: .bold, design: .rounded))
@@ -742,11 +773,13 @@ private struct SpicyLyricLine: View {
                             )
                         )
                         .shadow(color: Color.white.opacity(glow * 0.90), radius: CGFloat(4.0 + 12.0 * glow))
-                        .animation(.smooth(duration: 0.16), value: progress)
+                        // easeOut mimique l'inertie du spring physique: accélère au début, ralentit en fin de mot
+                        .animation(.timingCurve(0.0, 0.0, 0.2, 1.0, duration: 0.18), value: wordProgress)
                 }
             }
         }
     }
+
 
     // ─── MODE 2 : BALAYAGE PROGRESSIF CONTINU SANS BOÎTE (Line Mode) ─────────
     @ViewBuilder
