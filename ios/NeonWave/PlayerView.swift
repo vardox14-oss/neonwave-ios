@@ -674,24 +674,30 @@ private struct SpicyLyricLine: View {
             let wordLengths = words.map { max(1, $0.count) }
             let totalWeight = Double(wordLengths.reduce(0, +))
 
+            struct WordTiming {
+                let start: Double
+                let end: Double
+            }
+
             // Répartition pondérée du temps de chant sur chaque mot
-            let wordRanges: [(start: Double, end: Double)] = {
-                var res: [(Double, Double)] = []
+            let wordRanges: [WordTiming] = {
+                var res: [WordTiming] = []
                 var acc = 0.0
                 for len in wordLengths {
                     let s = acc / totalWeight
                     acc += Double(len)
                     let e = acc / totalWeight
-                    res.append((s, e))
+                    res.append(WordTiming(start: s, end: e))
                 }
                 return res
             }()
 
             // Index et progression continue du curseur sur la phrase
             let activeWordIndex = words.indices.first(where: { progress >= wordRanges[$0].start && progress < wordRanges[$0].end }) ?? (progress >= 1.0 ? max(0, words.count - 1) : 0)
-            let currentRange = wordRanges.indices.contains(activeWordIndex) ? wordRanges[activeWordIndex] : (0.0, 1.0)
-            let wordProgress = max(0, min(1.0, (progress - currentRange.start) / max(0.0001, currentRange.end - currentRange.start)))
-            let continuousWordPos = Double(activeWordIndex) + wordProgress
+            let currentRange = wordRanges.indices.contains(activeWordIndex) ? wordRanges[activeWordIndex] : WordTiming(start: 0.0, end: 1.0)
+            let span = max(0.0001, currentRange.end - currentRange.start)
+            let wordProgress: Double = max(0.0, min(1.0, (progress - currentRange.start) / span))
+            let continuousWordPos: Double = Double(activeWordIndex) + wordProgress
 
             FlowLayout(spacing: 7, lineSpacing: 7) {
                 ForEach(0..<words.count, id: \.self) { wordIndex in
