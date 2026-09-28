@@ -474,7 +474,7 @@ struct LyricsView: View {
 
     var body: some View {
         ScrollViewReader { proxy in
-            ZStack(alignment: .topTrailing) {
+            ZStack(alignment: .top) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         if player.loadingLyrics {
@@ -492,6 +492,11 @@ struct LyricsView: View {
                                 let activeIndex = player.activeLyricIndex ?? -1
                                 let isActive = index == activeIndex
                                 let isSung = !isActive && index < activeIndex
+                                let distance = abs(index - activeIndex)
+                                let nextTime = (index + 1 < player.lyrics.count) ? player.lyrics[index + 1].time : (line.time + 4.5)
+                                let lineDuration = max(0.5, nextTime - line.time)
+                                let elapsedInLine = max(0, player.elapsed + player.lyricsOffset - line.time)
+                                let progress = max(0, min(1.0, elapsedInLine / lineDuration))
 
                                 Button {
                                     player.seek(to: line)
@@ -499,9 +504,12 @@ struct LyricsView: View {
                                 } label: {
                                     SpicyLyricLine(
                                         line: line,
-                                        distance: abs(index - activeIndex),
+                                        distance: distance,
                                         isActive: isActive,
-                                        isSung: isSung
+                                        isSung: isSung,
+                                        progress: progress,
+                                        duration: lineDuration,
+                                        isWaveEffect: player.isWaveEffect
                                     )
                                 }
                                 .buttonStyle(PlainButtonStyle())
@@ -524,7 +532,7 @@ struct LyricsView: View {
                             .frame(maxWidth: .infinity, minHeight: 280)
                         }
                     }
-                    .padding(.horizontal, 20)
+                    .padding(.horizontal, 16)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .scrollIndicators(.hidden)
@@ -532,7 +540,7 @@ struct LyricsView: View {
                     LinearGradient(
                         stops: [
                             .init(color: .clear, location: 0.0),
-                            .init(color: .black, location: 0.10),
+                            .init(color: .black, location: 0.12),
                             .init(color: .black, location: 0.88),
                             .init(color: .clear, location: 1.0)
                         ],
@@ -541,32 +549,38 @@ struct LyricsView: View {
                     )
                 )
 
+                // ─── BARRE D'OUTILS SPICY LYRICS (Calage fin du timing Offset) ─────────
                 if !player.lyrics.isEmpty {
-                    HStack(spacing: 6) {
-                        Button { player.adjustLyricsOffset(by: -0.25); library.haptic() } label: {
-                            Image(systemName: "minus")
-                                .font(.system(size: 11, weight: .bold))
-                                .frame(width: 24, height: 24)
+                    HStack {
+                        Spacer()
+
+                        // Calage fin du timing (Offset)
+                        HStack(spacing: 5) {
+                            Button { player.adjustLyricsOffset(by: -0.25); library.haptic() } label: {
+                                Image(systemName: "minus")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .frame(width: 22, height: 22)
+                            }
+                            Button { player.resetLyricsOffset(); library.haptic() } label: {
+                                Text(String(format: "%+.2fs", player.lyricsOffset))
+                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                    .frame(minWidth: 46)
+                            }
+                            Button { player.adjustLyricsOffset(by: 0.25); library.haptic() } label: {
+                                Image(systemName: "plus")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .frame(width: 22, height: 22)
+                            }
                         }
-                        Button { player.resetLyricsOffset(); library.haptic() } label: {
-                            Text(String(format: "%+.2fs", player.lyricsOffset))
-                                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                .frame(minWidth: 50)
-                        }
-                        Button { player.adjustLyricsOffset(by: 0.25); library.haptic() } label: {
-                            Image(systemName: "plus")
-                                .font(.system(size: 11, weight: .bold))
-                                .frame(width: 24, height: 24)
-                        }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 4)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .overlay(Capsule().stroke(Color.white.opacity(0.14), lineWidth: 1))
+                        .shadow(color: .black.opacity(0.30), radius: 8, y: 3)
                     }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 1))
-                    .shadow(color: .black.opacity(0.35), radius: 8, y: 4)
+                    .padding(.horizontal, 12)
                     .padding(.top, 4)
-                    .padding(.trailing, 8)
                 }
             }
             .onAppear {
@@ -576,7 +590,7 @@ struct LyricsView: View {
             }
             .onChange(of: player.activeLyricIndex) { _, value in
                 if let value {
-                    withAnimation(.spring(response: 0.52, dampingFraction: 0.82)) {
+                    withAnimation(.spring(response: 0.48, dampingFraction: 0.80)) {
                         proxy.scrollTo(value, anchor: .center)
                     }
                 }
@@ -585,40 +599,241 @@ struct LyricsView: View {
     }
 }
 
+// ─── LIGNE DE PAROLE EXACT SPICY LYRICS 6.1.1 ──────────────────────────────
 private struct SpicyLyricLine: View {
     let line: LyricLine
     let distance: Int
     let isActive: Bool
     let isSung: Bool
+    let progress: Double
+    let duration: Double
+    let isWaveEffect: Bool
 
-    // Spicy Lyrics opacities:
-    // --Vocal-Active-opacity: 1;
-    // --Vocal-NotSung-opacity: 0.51;
-    // --Vocal-Sung-opacity: 0.35;
+    private var isInstrumental: Bool {
+        let trimmed = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty || trimmed == "•••" || trimmed == "..." || trimmed == "♪" || (duration >= 6.5 && trimmed.count < 4)
+    }
+
     private var textOpacity: Double {
         if isActive { return 1.0 }
-        if isSung { return 0.35 }
+        if isSung { return 0.497 }
         return 0.51
     }
 
-    private var textScale: Double {
-        isActive ? 1.04 : 0.96
+    private var textScale: CGFloat {
+        if isActive { return 1.05 }
+        return 0.95
+    }
+
+    private var distanceBlur: CGFloat {
+        if isActive { return 0.0 }
+        return CGFloat(min(Double(distance) * 2.2, 10.0))
     }
 
     var body: some View {
-        Text(line.text)
-            .font(.system(size: 26, weight: .bold, design: .rounded))
-            .tracking(-0.35)
-            .lineSpacing(6)
-            .multilineTextAlignment(.leading)
-            .foregroundStyle(Color.white.opacity(textOpacity))
-            .shadow(color: isActive ? Color.white.opacity(0.50) : Color.clear, radius: 10, x: 0, y: 0)
-            .shadow(color: isActive ? Color.white.opacity(0.25) : Color.clear, radius: 22, x: 0, y: 0)
-            .scaleEffect(textScale, anchor: .leading)
-            .blur(radius: !isActive && distance > 3 ? min(1.6, Double(distance - 2) * 0.5) : 0)
-            .padding(.vertical, 4)
-            .animation(.spring(response: 0.40, dampingFraction: 0.82), value: isActive)
-            .contentShape(Rectangle())
+        Group {
+            if isInstrumental {
+                SpicyInstrumentalDots(progress: progress, isActive: isActive)
+            } else if isWaveEffect {
+                syllableWaveView
+            } else {
+                lineSweepView
+            }
+        }
+        .scaleEffect(textScale, anchor: .leading)
+        .blur(radius: distanceBlur)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(isActive ? Color.white.opacity(0.08) : Color.clear)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(isActive ? Color.white.opacity(0.12) : Color.clear, lineWidth: 1)
+                )
+        )
+        .animation(.spring(response: 0.38, dampingFraction: 0.64), value: isActive)
+        .contentShape(Rectangle())
+    }
+
+    // ─── MODE 1 : VAGUE WATER & PHYSIQUE PAR SYLLABE (Syllable Mode) ─────────
+    @ViewBuilder
+    private var syllableWaveView: some View {
+        if !isActive {
+            Text(line.text)
+                .font(.system(size: 26, weight: .bold, design: .rounded))
+                .tracking(-0.35)
+                .lineSpacing(6)
+                .multilineTextAlignment(.leading)
+                .foregroundStyle(Color.white.opacity(textOpacity))
+        } else {
+            let words = line.text.components(separatedBy: " ")
+            let totalWords = max(1, words.count)
+            let wordWindow = 1.0 / Double(totalWords)
+
+            FlowLayout(spacing: 7, lineSpacing: 7) {
+                ForEach(0..<words.count, id: \.self) { wordIndex in
+                    let wordText = words[wordIndex]
+                    let wordStart = Double(wordIndex) * wordWindow
+                    let wordEnd = wordStart + wordWindow
+                    let isWordActive = progress >= wordStart && progress < wordEnd
+                    let isWordSung = progress >= wordEnd
+
+                    let chars = Array(wordText)
+                    let totalChars = max(1, chars.count)
+                    let activeCharIndex = isWordActive ? Int(((progress - wordStart) / wordWindow) * Double(totalChars)) : -1
+
+                    HStack(spacing: 0) {
+                        ForEach(0..<chars.count, id: \.self) { charIndex in
+                            let ch = String(chars[charIndex])
+                            let charDistance = activeCharIndex >= 0 ? abs(charIndex - activeCharIndex) : 99
+                            // Formule exacte Spicy Lyrics 6.1.1: 1 / (1 + distance^2.8)
+                            let falloff = activeCharIndex >= 0 ? max(0, 1.0 / (1.0 + pow(Double(charDistance), 2.8))) : 0.0
+                            let scale = isWordActive ? (0.95 + (1.175 - 0.95) * falloff) : (isWordSung ? 1.0 : 0.95)
+                            let yOffset = isWordActive ? (-0.018 * 42.0 * falloff) : 0.0
+                            let glow = isWordActive ? falloff : 0.0
+
+                            Text(ch)
+                                .font(.system(size: 26, weight: .bold, design: .rounded))
+                                .tracking(-0.35)
+                                .scaleEffect(scale, anchor: .center)
+                                .offset(y: CGFloat(yOffset))
+                                .foregroundStyle(
+                                    isWordSung ? Color.white :
+                                    (isWordActive && charIndex <= activeCharIndex ? Color.white : Color.white.opacity(0.40))
+                                )
+                                .shadow(color: Color.white.opacity(glow * 0.85), radius: CGFloat(4.0 + 12.0 * glow))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ─── MODE 2 : BALAYAGE PROGRESSIF CONTINU SANS BOÎTE (Line Mode) ─────────
+    @ViewBuilder
+    private var lineSweepView: some View {
+        if !isActive {
+            Text(line.text)
+                .font(.system(size: 26, weight: .bold, design: .rounded))
+                .tracking(-0.35)
+                .lineSpacing(6)
+                .multilineTextAlignment(.leading)
+                .foregroundStyle(Color.white.opacity(textOpacity))
+        } else {
+            let targetPos = -0.20 + 1.20 * progress
+            let glowIntensity = sin(progress * .pi)
+
+            Text(line.text)
+                .font(.system(size: 26, weight: .bold, design: .rounded))
+                .tracking(-0.35)
+                .lineSpacing(6)
+                .multilineTextAlignment(.leading)
+                .foregroundColor(.clear)
+                .overlay(
+                    GeometryReader { geo in
+                        LinearGradient(
+                            stops: [
+                                .init(color: .white, location: 0),
+                                .init(color: .white, location: max(0, targetPos)),
+                                .init(color: .white.opacity(0.35), location: min(1.0, targetPos + 0.20)),
+                                .init(color: .white.opacity(0.35), location: 1.0)
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .mask(
+                            Text(line.text)
+                                .font(.system(size: 26, weight: .bold, design: .rounded))
+                                .tracking(-0.35)
+                                .lineSpacing(6)
+                                .multilineTextAlignment(.leading)
+                                .frame(width: geo.size.width, alignment: .leading)
+                        )
+                    }
+                )
+                .shadow(color: Color.white.opacity(0.50 * glowIntensity), radius: 10, x: 0, y: 0)
+                .shadow(color: Color.white.opacity(0.25 * glowIntensity), radius: 22, x: 0, y: 0)
+        }
+    }
+}
+
+// ─── INTERMÈDE MUSICAL À 3 POINTS (Exact Spicy Lyrics DotLine) ──────────────
+private struct SpicyInstrumentalDots: View {
+    let progress: Double
+    let isActive: Bool
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ForEach(0..<3, id: \.self) { dotIdx in
+                let dotStart = Double(dotIdx) / 3.0
+                let dotEnd = Double(dotIdx + 1) / 3.0
+                let isDotActive = progress >= dotStart && progress < dotEnd
+                let isDotSung = progress >= dotEnd
+                let dotProgress = isDotActive ? max(0, min(1.0, (progress - dotStart) / (dotEnd - dotStart))) : 0.0
+
+                let bounce = isDotActive ? sin(dotProgress * .pi) : 0.0
+                let scale: CGFloat = isDotActive ? CGFloat(0.75 + 0.30 * bounce) : (isDotSung ? 1.0 : 0.75)
+                let yOffset: CGFloat = isDotActive ? CGFloat(-6.0 * bounce) : 0.0
+                let opacity: Double = isDotSung ? 1.0 : (isDotActive ? (0.35 + 0.65 * bounce) : 0.35)
+                let glow: Double = isDotActive ? bounce : 0.0
+
+                Circle()
+                    .fill(Color.white.opacity(opacity))
+                    .frame(width: 11, height: 11)
+                    .scaleEffect(scale)
+                    .offset(y: yOffset)
+                    .shadow(color: Color.white.opacity(glow * 0.95), radius: CGFloat(4.0 + 8.0 * glow))
+            }
+        }
+        // Effondrement élastique (pre-hidden vanishing collapse)
+        .scaleEffect(progress > 0.92 ? max(0, (1.0 - progress) / 0.08) : 1.0)
+        .padding(.vertical, 10)
+        .padding(.horizontal, 14)
+        .animation(.spring(response: 0.35, dampingFraction: 0.60), value: progress)
+    }
+}
+
+// ─── FLOWLAYOUT SWIFTUI POUR LE RETOUR À LA LIGNE DES MOTS ─────────────────
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 6
+    var lineSpacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        var currentX: CGFloat = 0
+        var currentY: CGFloat = 0
+        var lineHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if currentX + size.width > maxWidth && currentX > 0 {
+                currentX = 0
+                currentY += lineHeight + lineSpacing
+                lineHeight = 0
+            }
+            currentX += size.width + spacing
+            lineHeight = max(lineHeight, size.height)
+        }
+        return CGSize(width: maxWidth, height: currentY + lineHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var currentX = bounds.minX
+        var currentY = bounds.minY
+        var lineHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if currentX + size.width > bounds.maxX && currentX > bounds.minX {
+                currentX = bounds.minX
+                currentY += lineHeight + lineSpacing
+                lineHeight = 0
+            }
+            subview.place(at: CGPoint(x: currentX, y: currentY), proposal: .unspecified)
+            currentX += size.width + spacing
+            lineHeight = max(lineHeight, size.height)
+        }
     }
 }
 

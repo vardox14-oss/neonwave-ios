@@ -82,6 +82,9 @@ private final class SilentAudioKeepAlive {
     @Published private(set) var activeLyricIndex: Int?
     @Published private(set) var loadingLyrics = false
     @Published private(set) var lyricsOffset: Double = 0
+    // Alternance automatique des styles 1 musique sur 2 : Vague -> Ligne -> Vague -> Ligne...
+    @Published private(set) var songCounter: Int = 0
+    var isWaveEffect: Bool { songCounter % 2 != 0 }
 
     private let player = AVPlayer()
     private lazy var appleMusicPlayer = ApplicationMusicPlayer.shared
@@ -106,7 +109,7 @@ private final class SilentAudioKeepAlive {
     private var musicKitCompletedTrackID: String?
 
     init() {
-        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.25, preferredTimescale: 600), queue: .main) { [weak self] time in
+        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.05, preferredTimescale: 600), queue: .main) { [weak self] time in
             Task { @MainActor in
                 guard let self, !self.isYouTubeActive else { return }
                 self.elapsed = time.seconds.isFinite ? time.seconds : 0
@@ -331,6 +334,7 @@ private final class SilentAudioKeepAlive {
         // Mémoriser la durée Spotify AVANT de charger le stream YouTube
         // (le stream peut être plus long que la chanson réelle)
         spotifyDuration = target.duration > 10 ? target.duration : 0
+        songCounter += 1
         current = target; elapsed = 0; duration = target.duration; lyricsOffset = 0; lyricsRequestedDuration = 0
         lyricsTask?.cancel(); lyricsFallbackTask?.cancel(); lyrics = []; plainLyrics = nil; activeLyricIndex = nil; loadingLyrics = true
         updateNowPlaying(includeArtwork: true)
