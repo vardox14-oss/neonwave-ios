@@ -656,7 +656,6 @@ private struct SpicyLyricLine: View {
         .contentShape(Rectangle())
     }
 
-    // ─── MODE 1 : VAGUE WATER & PHYSIQUE PAR SYLLABE (Syllable Mode) ─────────
     // ─── MODE 1 : VAGUE WATER & PHYSIQUE PAR LETTRE (Syllable Wave Mode) ─────
     @ViewBuilder
     private var syllableWaveView: some View {
@@ -679,10 +678,12 @@ private struct SpicyLyricLine: View {
                 return res
             }()
             let totalLineChars = max(1, (offsets.last ?? 0) + (words.last?.count ?? 0))
-            // Progression continue et fluide de la crête de vague sur toute la phrase
-            let waveCenter = progress * Double(totalLineChars)
-            // Rayon large de la vague (3.2 lettres = ~6.4 lettres soulevées simultanément)
-            let waveRadius = 3.2
+
+            // Position exacte du curseur sur la phrase (de 0 à totalLineChars)
+            let cursor = progress * Double(totalLineChars)
+            let activeIdx = min(totalLineChars - 1, max(0, Int(cursor)))
+            let charFract = cursor - Double(activeIdx)
+            let easedFract = sin(charFract * (.pi / 2.0)) // easeSinOut Spicy Lyrics
 
             FlowLayout(spacing: 7, lineSpacing: 7) {
                 ForEach(0..<words.count, id: \.self) { wordIndex in
@@ -693,28 +694,44 @@ private struct SpicyLyricLine: View {
                     HStack(spacing: 0) {
                         ForEach(0..<chars.count, id: \.self) { charIndex in
                             let ch = String(chars[charIndex])
-                            let globalPos = Double(wordOffset + charIndex)
-                            let dist = globalPos - waveCenter
+                            let k = wordOffset + charIndex
+                            let distance = abs(k - activeIdx)
 
-                            let inWave = abs(dist) <= waveRadius
-                            let waveFactor = inWave ? (0.5 * (1.0 + cos((dist / waveRadius) * .pi))) : 0.0
-                            let isPast = dist < -waveRadius
+                            // 1. Formule exacte de proximité Spicy Lyrics 6.1.1 : 1 / (1 + distance^2.8)
+                            let falloff = 1.0 / (1.0 + pow(Double(distance), 2.8))
+                            let glowFalloff = 1.0 / (1.0 + Double(distance) * 0.9)
 
-                            let scale = inWave ? (0.98 + 0.17 * waveFactor) : (isPast ? 1.0 : 0.95)
-                            let yOffset = inWave ? (-6.0 * waveFactor) : 0.0
-                            let glow = inWave ? waveFactor : 0.0
+                            // 2. Ondulation physique (Scale 1.175 + Rebond vertical Y -6.5pt)
+                            let isCurrent = (k == activeIdx)
+                            let isPast = (k < activeIdx)
+                            let crestPulse = sin(charFract * .pi)
+
+                            let scale: CGFloat = isCurrent ? (1.0 + 0.175 * crestPulse) : (isPast ? 1.0 : (0.95 + 0.05 * CGFloat(falloff)))
+                            let yOffset: CGFloat = isCurrent ? (-6.5 * crestPulse) : (-5.5 * CGFloat(falloff))
+                            let glow: Double = isCurrent ? (0.60 + 0.40 * crestPulse) : (0.70 * glowFalloff)
+
+                            // 3. Balayage lumineux en gradient simultané sur la lettre (-20% à 100%)
+                            let gradPos = isCurrent ? (-0.20 + 1.20 * easedFract) : (isPast ? 1.0 : -0.20)
 
                             Text(ch)
                                 .font(.system(size: 26, weight: .bold, design: .rounded))
                                 .tracking(-0.35)
                                 .scaleEffect(scale, anchor: .center)
-                                .offset(y: CGFloat(yOffset))
+                                .offset(y: yOffset)
                                 .foregroundStyle(
-                                    isPast ? Color.white :
-                                    (inWave && dist <= 0.5 ? Color.white : Color.white.opacity(0.40 + 0.50 * waveFactor))
+                                    LinearGradient(
+                                        stops: [
+                                            .init(color: .white, location: 0),
+                                            .init(color: .white, location: max(0, min(1.0, gradPos))),
+                                            .init(color: .white.opacity(0.38), location: max(0, min(1.0, gradPos + 0.22))),
+                                            .init(color: .white.opacity(0.38), location: 1.0)
+                                        ],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
                                 )
                                 .shadow(color: Color.white.opacity(glow * 0.90), radius: CGFloat(4.0 + 10.0 * glow))
-                                .animation(.smooth(duration: 0.16), value: progress)
+                                .animation(.smooth(duration: 0.14), value: progress)
                         }
                     }
                 }
