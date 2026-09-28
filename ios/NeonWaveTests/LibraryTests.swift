@@ -77,6 +77,27 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(lines.map(\.time), [1.5, 4.75, 9.0])
     }
 
+    func testInterludesDoNotShortenSustainedPhrases() {
+        let lrc = """
+        [00:00.00]Une phrase qui dure longtemps
+        [00:05.00]Encore
+        [00:14.00]La suite
+        """
+        let lines = LyricsService.parseLRC(lrc, insertInterludes: true)
+        XCTAssertEqual(lines.map(\.text), ["Une phrase qui dure longtemps", "Encore", "La suite"])
+        XCTAssertEqual(lines.map(\.time), [0, 5, 14])
+        XCTAssertEqual(lines[1].time - lines[0].time, 5)
+        XCTAssertEqual(lines[2].time - lines[1].time, 9)
+    }
+
+    func testInterludesOnlyAddKnownIntroBeforeFirstPhrase() {
+        let lrc = "[00:08.00]Première phrase\n[00:13.00]Deuxième phrase"
+        let lines = LyricsService.parseLRC(lrc, insertInterludes: true)
+        XCTAssertEqual(lines.map(\.text), ["•••", "Première phrase", "Deuxième phrase"])
+        XCTAssertEqual(lines.map(\.time), [0, 8, 13])
+        XCTAssertEqual(LyricsService.parseLRC(lrc).count, 2)
+    }
+
     func testLyricsCandidateUsesTheActualPlaybackDuration() throws {
         let short = LyricsService.LRCLIBResponse(trackName: "Ainsi va la rue", artistName: "Rim'K", duration: 132, plainLyrics: nil, syncedLyrics: "[00:01.00]Court")
         let full = LyricsService.LRCLIBResponse(trackName: "Ainsi va la rue", artistName: "Rim'K", duration: 158, plainLyrics: nil, syncedLyrics: "[00:01.00]Complet")
@@ -110,6 +131,40 @@ final class LibraryTests: XCTestCase {
 
 
 final class SpicyWaveAnimationTests: XCTestCase {
+    func testLetterWaveDependsOnSungDurationNotSpelling() {
+        XCTAssertFalse(SpicyWaveTiming.usesLetterWave(text: "extraordinairement", duration: 0.999))
+        XCTAssertTrue(SpicyWaveTiming.usesLetterWave(text: "oh", duration: 1))
+        XCTAssertTrue(SpicyWaveTiming.usesLetterWave(text: "lundi", duration: 1.4))
+        XCTAssertFalse(SpicyWaveTiming.usesLetterWave(text: "lundi", duration: 0.3))
+    }
+
+    func testEnhancedLRCPreservesHeldWordAndEndMarker() throws {
+        let lrc = "[00:10.00]<00:10.00>du <00:10.20>lundi <00:10.50>au <00:10.70>lundi<00:12.20>\n[00:15.00]Suite"
+        let lines = LyricsService.parseLRC(lrc, insertInterludes: true)
+        let line = try XCTUnwrap(lines.first(where: { $0.text == "du lundi au lundi" }))
+        let words = line.animationWords(duration: 5)
+        XCTAssertEqual(words.map(\.text), ["du", "lundi", "au", "lundi"])
+        XCTAssertEqual(try XCTUnwrap(words.last?.end), 12.2, accuracy: 1e-9)
+        let held = words.map { SpicyWaveTiming.usesLetterWave(text: $0.text, duration: ($0.end ?? 0) - $0.start) }
+        XCTAssertEqual(held, [false, false, false, true])
+        XCTAssertEqual(lines.filter { $0.text == "•••" }.count, 1) // intro only
+    }
+
+    func testEnhancedLRCOffsetsAndRepeatedLines() throws {
+        let lines = LyricsService.parseLRC("[offset:+500]\n[00:01.00][00:10.00]<00:01.00>oh<00:02.50>")
+        XCTAssertEqual(lines.map(\.time), [1.5, 10.5])
+        XCTAssertEqual(lines[0].words.first?.start, 1.5)
+        XCTAssertEqual(lines[1].words.first?.start, 10.5)
+        XCTAssertEqual(lines[1].words.first?.end, 12)
+    }
+
+    func testPlainLRCFallbackKeepsFullPhraseDuration() throws {
+        let line = LyricLine(time: 5, text: "Un mot tenu")
+        let words = line.animationWords(duration: 8)
+        XCTAssertEqual(words.first?.start, 5)
+        XCTAssertEqual(try XCTUnwrap(words.last?.end), 13, accuracy: 1e-9)
+    }
+
     func testSourceCurveKnotsAndEndpoints() {
         XCTAssertEqual(SpicyWaveCurve.scale.value(at: 0), 0.95, accuracy: 1e-12)
         XCTAssertEqual(SpicyWaveCurve.scale.value(at: 0.7), 1.0505, accuracy: 1e-12)

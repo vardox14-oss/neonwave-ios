@@ -495,7 +495,7 @@ struct LyricsView: View {
                                 let distance = abs(index - activeIndex)
                                 let nextTime = (index + 1 < player.lyrics.count) ? player.lyrics[index + 1].time : (line.time + 4.5)
                                 let lineDuration = max(0.5, nextTime - line.time)
-                                let elapsedInLine = max(0, player.elapsed + player.lyricsOffset - line.time)
+                                let elapsedInLine = max(0, player.elapsed - player.lyricsOffset - line.time)
                                 let progress = max(0, min(1.0, elapsedInLine / lineDuration))
                                 let isDot = (line.text == "•••" || line.text == "..." || line.text == "♪")
 
@@ -605,11 +605,6 @@ struct LyricsView: View {
 
 // ─── LIGNE DE PAROLE EXACT SPICY LYRICS 6.1.1 ──────────────────────────────
 private struct SpicyLyricLine: View {
-    private struct WordTiming {
-        let start: Double
-        let end: Double
-    }
-
     let line: LyricLine
     let distance: Int
     let isActive: Bool
@@ -670,26 +665,16 @@ private struct SpicyLyricLine: View {
     // Spicy Lyrics word curves, with estimated timing when only line timestamps exist.
     // Keep the same layout before/during/after singing to avoid changing line wraps.
     private var syllableWaveView: some View {
-        let words = line.text.split(whereSeparator: { $0.isWhitespace }).map(String.init)
-        let lengths = words.map { max(1, $0.count) }
-        let total = Double(max(1, lengths.reduce(0, +)))
-        let ranges: [WordTiming] = {
-            var cursor = 0.0
-            return lengths.map { length in
-                let start = cursor / total
-                cursor += Double(length)
-                return WordTiming(start: start, end: cursor / total)
-            }
-        }()
-
+        let words = line.animationWords(duration: duration)
         return FlowLayout(spacing: 7, lineSpacing: 7) {
             ForEach(words.indices, id: \.self) { index in
-                let range = ranges[index]
+                let word = words[index]
+                let wordDuration = max(0.001, (word.end ?? (line.time + duration)) - word.start)
                 let wordProgress = isActive
-                    ? (progress - range.start) / max(0.0001, range.end - range.start)
+                    ? (line.time + progress * duration - word.start) / wordDuration
                     : (isSung ? 1.0 : 0.0)
-                SpicyWaveWord(text: words[index], progress: wordProgress,
-                              duration: duration * (range.end - range.start),
+                SpicyWaveWord(text: word.text, progress: wordProgress,
+                              duration: wordDuration,
                               isActive: isActive, isPlaying: isPlaying)
             }
         }
@@ -765,9 +750,7 @@ private struct SpicyWaveWord: View {
     private var characters: [String] { text.map(String.init) }
     private var usesLetters: Bool {
         // IsLetterCapable.ts: sustained words >= 1000ms. Keep cursive scripts joined.
-        duration >= 1 && !text.unicodeScalars.contains {
-            (0x0590...0x08FF).contains(Int($0.value))
-        }
+        SpicyWaveTiming.usesLetterWave(text: text, duration: duration)
     }
 
     var body: some View {
@@ -874,6 +857,16 @@ private struct SpicyWaveWord: View {
                 glow = SpicyWaveCurve.glow.value(at: local) * glowFalloff
             }
             letters[index].update(scale: scale, lift: lift, glow: glow, dt: dt, snap: snap)
+        }
+    }
+}
+
+enum SpicyWaveTiming {
+    static func usesLetterWave(text: String, duration: Double) -> Bool {
+        // IsLetterCapable.ts normal mode: duration >= 1000 ms, irrespective
+        // of character count or position in the phrase. Preserve joined scripts.
+        duration >= 1 && !text.unicodeScalars.contains {
+            (0x0590...0x08FF).contains(Int($0.value))
         }
     }
 }

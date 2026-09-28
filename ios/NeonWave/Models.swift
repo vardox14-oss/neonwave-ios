@@ -47,10 +47,36 @@ struct Album: Identifiable, Codable, Hashable {
     var appleMusicID: String? = nil
 }
 
+struct LyricWord: Hashable {
+    let text: String
+    let start: Double
+    let end: Double?
+}
+
 struct LyricLine: Identifiable, Hashable {
     let id = UUID()
     let time: Double
     let text: String
+    var words: [LyricWord] = []
+
+    func animationWords(duration: Double) -> [LyricWord] {
+        if !words.isEmpty {
+            return words.map { word in
+                LyricWord(text: word.text, start: word.start,
+                          end: word.end ?? max(word.start + 0.05, time + duration))
+            }
+        }
+        // Plain LRC supplies no word durations. Preserve the full phrase interval;
+        // do not force a final-word emphasis or invent instrumental gaps.
+        let tokens = text.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        let total = Double(max(1, tokens.reduce(0) { $0 + $1.count }))
+        var cursor = time
+        return tokens.map { token in
+            let start = cursor
+            cursor += duration * Double(token.count) / total
+            return LyricWord(text: token, start: start, end: cursor)
+        }
+    }
 }
 
 struct ArtistChoice: Identifiable, Codable, Hashable {
