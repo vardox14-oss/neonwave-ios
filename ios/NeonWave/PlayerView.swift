@@ -497,23 +497,26 @@ struct LyricsView: View {
                                 let lineDuration = max(0.5, nextTime - line.time)
                                 let elapsedInLine = max(0, player.elapsed + player.lyricsOffset - line.time)
                                 let progress = max(0, min(1.0, elapsedInLine / lineDuration))
+                                let isDot = (line.text == "•••" || line.text == "..." || line.text == "♪")
 
-                                Button {
-                                    player.seek(to: line)
-                                    library.haptic()
-                                } label: {
-                                    SpicyLyricLine(
-                                        line: line,
-                                        distance: distance,
-                                        isActive: isActive,
-                                        isSung: isSung,
-                                        progress: progress,
-                                        duration: lineDuration,
-                                        isWaveEffect: player.isWaveEffect
-                                    )
+                                if !isDot || isActive {
+                                    Button {
+                                        player.seek(to: line)
+                                        library.haptic()
+                                    } label: {
+                                        SpicyLyricLine(
+                                            line: line,
+                                            distance: distance,
+                                            isActive: isActive,
+                                            isSung: isSung,
+                                            progress: progress,
+                                            duration: lineDuration,
+                                            isWaveEffect: player.isWaveEffect
+                                        )
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
+                                    .id(index)
                                 }
-                                .buttonStyle(PlainButtonStyle())
-                                .id(index)
                             }
                             Color.clear.frame(height: 180)
                         } else if let plain = player.plainLyrics, !plain.isEmpty {
@@ -611,23 +614,23 @@ private struct SpicyLyricLine: View {
 
     private var isInstrumental: Bool {
         let trimmed = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty || trimmed == "•••" || trimmed == "..." || trimmed == "♪" || (duration >= 6.5 && trimmed.count < 4)
+        return trimmed == "•••" || trimmed == "..." || trimmed == "♪" || trimmed.isEmpty
     }
 
     private var textOpacity: Double {
         if isActive { return 1.0 }
-        if isSung { return 0.497 }
-        return 0.51
+        if isSung { return 0.497 } // Spicy Lyrics --Vocal-Sung-opacity: 0.497
+        return 0.51               // Spicy Lyrics --Vocal-NotSung-opacity: 0.51
     }
 
     private var textScale: CGFloat {
-        if isActive { return 1.05 }
-        return 0.95
+        if isActive { return 1.05 } // Spicy Lyrics Active line scale: 1.05
+        return 0.95                // Spicy Lyrics NotSung/Sung line scale: 0.95
     }
 
     private var distanceBlur: CGFloat {
         if isActive { return 0.0 }
-        return CGFloat(min(Double(distance) * 2.2, 10.0))
+        return CGFloat(min(Double(distance) * 2.2, 10.0)) // Spicy Lyrics BlurMultiplier
     }
 
     var body: some View {
@@ -640,23 +643,23 @@ private struct SpicyLyricLine: View {
                 lineSweepView
             }
         }
-        .scaleEffect(textScale, anchor: .leading)
-        .blur(radius: distanceBlur)
+        .scaleEffect(isInstrumental ? 1.0 : textScale, anchor: .leading)
+        .blur(radius: isInstrumental ? 0.0 : distanceBlur)
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.vertical, isInstrumental ? 4 : 8)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(isActive ? Color.white.opacity(0.08) : Color.clear)
+                .fill(isActive && !isInstrumental ? Color.white.opacity(0.08) : Color.clear)
                 .overlay(
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(isActive ? Color.white.opacity(0.12) : Color.clear, lineWidth: 1)
+                        .stroke(isActive && !isInstrumental ? Color.white.opacity(0.12) : Color.clear, lineWidth: 1)
                 )
         )
         .animation(.spring(response: 0.38, dampingFraction: 0.64), value: isActive)
         .contentShape(Rectangle())
     }
 
-    // ─── MODE 1 : VAGUE WATER & PHYSIQUE PAR LETTRE (Syllable Wave Mode) ─────
+    // ─── MODE 1 : VAGUE WATER & PHYSIQUE PAR MOT (Syllable Wave Mode) ─────────
     @ViewBuilder
     private var syllableWaveView: some View {
         if !isActive {
@@ -667,73 +670,73 @@ private struct SpicyLyricLine: View {
                 .multilineTextAlignment(.leading)
                 .foregroundStyle(Color.white.opacity(textOpacity))
         } else {
-            let words = line.text.components(separatedBy: " ")
-            let offsets: [Int] = {
-                var res: [Int] = []
-                var count = 0
-                for w in words {
-                    res.append(count)
-                    count += w.count + 1
+            let words = line.text.components(separatedBy: " ").filter { !$0.isEmpty }
+            let wordLengths = words.map { max(1, $0.count) }
+            let totalWeight = Double(wordLengths.reduce(0, +))
+
+            // Répartition pondérée du temps de chant sur chaque mot
+            let wordRanges: [(start: Double, end: Double)] = {
+                var res: [(Double, Double)] = []
+                var acc = 0.0
+                for len in wordLengths {
+                    let s = acc / totalWeight
+                    acc += Double(len)
+                    let e = acc / totalWeight
+                    res.append((s, e))
                 }
                 return res
             }()
-            let totalLineChars = max(1, (offsets.last ?? 0) + (words.last?.count ?? 0))
 
-            // Position exacte du curseur sur la phrase (de 0 à totalLineChars)
-            let cursor = progress * Double(totalLineChars)
-            let activeIdx = min(totalLineChars - 1, max(0, Int(cursor)))
-            let charFract = cursor - Double(activeIdx)
-            let easedFract = sin(charFract * (.pi / 2.0)) // easeSinOut Spicy Lyrics
+            // Index et progression continue du curseur sur la phrase
+            let activeWordIndex = words.indices.first(where: { progress >= wordRanges[$0].start && progress < wordRanges[$0].end }) ?? (progress >= 1.0 ? max(0, words.count - 1) : 0)
+            let currentRange = wordRanges.indices.contains(activeWordIndex) ? wordRanges[activeWordIndex] : (0.0, 1.0)
+            let wordProgress = max(0, min(1.0, (progress - currentRange.start) / max(0.0001, currentRange.end - currentRange.start)))
+            let continuousWordPos = Double(activeWordIndex) + wordProgress
 
             FlowLayout(spacing: 7, lineSpacing: 7) {
                 ForEach(0..<words.count, id: \.self) { wordIndex in
                     let wordText = words[wordIndex]
-                    let wordOffset = offsets[wordIndex]
-                    let chars = Array(wordText)
+                    let distance = abs(Double(wordIndex) - continuousWordPos)
 
-                    HStack(spacing: 0) {
-                        ForEach(0..<chars.count, id: \.self) { charIndex in
-                            let ch = String(chars[charIndex])
-                            let k = wordOffset + charIndex
-                            let distance = abs(k - activeIdx)
+                    // 1. Formule de proximité fluide Fraktality Spicy Lyrics 6.1.1
+                    let falloff = 1.0 / (1.0 + pow(distance * 1.5, 2.6))
+                    let glowFalloff = 1.0 / (1.0 + distance * 0.9)
 
-                            // 1. Formule exacte de proximité Spicy Lyrics 6.1.1 : 1 / (1 + distance^2.8)
-                            let falloff = 1.0 / (1.0 + pow(Double(distance), 2.8))
-                            let glowFalloff = 1.0 / (1.0 + Double(distance) * 0.9)
+                    let isCurrent = (wordIndex == activeWordIndex)
+                    let isPast = (Double(wordIndex) < continuousWordPos - 0.45)
 
-                            // 2. Ondulation physique (Scale 1.175 + Rebond vertical Y -6.5pt)
-                            let isCurrent = (k == activeIdx)
-                            let isPast = (k < activeIdx)
-                            let crestPulse = sin(charFract * .pi)
+                    // 2. Ondulation physique Vague d'eau (Rebond vertical Y & Scale 1.0505)
+                    // ScaleSpline: 0.95 -> 1.0505 -> 1.0
+                    // YOffsetSpline: 0 -> -7.0pt -> 0
+                    let crestPulse = isCurrent ? sin(wordProgress * .pi) : 0.0
+                    let scale: CGFloat = isCurrent ? (1.0 + 0.065 * crestPulse) : (isPast ? 1.0 : (0.95 + 0.05 * CGFloat(falloff)))
+                    let yOffset: CGFloat = isCurrent ? (-7.0 * crestPulse) : (-6.0 * CGFloat(falloff))
 
-                            let scale: CGFloat = isCurrent ? (1.0 + 0.175 * crestPulse) : (isPast ? 1.0 : (0.95 + 0.05 * CGFloat(falloff)))
-                            let yOffset: CGFloat = isCurrent ? (-6.5 * crestPulse) : (-5.5 * CGFloat(falloff))
-                            let glow: Double = isCurrent ? (0.60 + 0.40 * crestPulse) : (0.70 * glowFalloff)
+                    // 3. Halo volumétrique rayonnant (text-shadow diffuse)
+                    let glow: Double = isCurrent ? (0.65 + 0.35 * crestPulse) : (isPast ? 0.20 : (0.75 * glowFalloff))
 
-                            // 3. Balayage lumineux en gradient simultané sur la lettre (-20% à 100%)
-                            let gradPos = isCurrent ? (-0.20 + 1.20 * easedFract) : (isPast ? 1.0 : -0.20)
+                    // 4. Balayage lumineux en gradient simultané (-20% à 100%)
+                    let gradPos = isCurrent ? (-0.20 + 1.20 * wordProgress) : (isPast ? 1.0 : -0.20)
 
-                            Text(ch)
-                                .font(.system(size: 26, weight: .bold, design: .rounded))
-                                .tracking(-0.35)
-                                .scaleEffect(scale, anchor: .center)
-                                .offset(y: yOffset)
-                                .foregroundStyle(
-                                    LinearGradient(
-                                        stops: [
-                                            .init(color: .white, location: 0),
-                                            .init(color: .white, location: max(0, min(1.0, gradPos))),
-                                            .init(color: .white.opacity(0.38), location: max(0, min(1.0, gradPos + 0.22))),
-                                            .init(color: .white.opacity(0.38), location: 1.0)
-                                        ],
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    )
-                                )
-                                .shadow(color: Color.white.opacity(glow * 0.90), radius: CGFloat(4.0 + 10.0 * glow))
-                                .animation(.smooth(duration: 0.14), value: progress)
-                        }
-                    }
+                    Text(wordText)
+                        .font(.system(size: 26, weight: .bold, design: .rounded))
+                        .tracking(-0.35)
+                        .scaleEffect(scale, anchor: .center)
+                        .offset(y: yOffset)
+                        .foregroundStyle(
+                            LinearGradient(
+                                stops: [
+                                    .init(color: .white, location: 0),
+                                    .init(color: .white, location: max(0, min(1.0, gradPos))),
+                                    .init(color: .white.opacity(0.40), location: max(0, min(1.0, gradPos + 0.22))),
+                                    .init(color: .white.opacity(0.40), location: 1.0)
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .shadow(color: Color.white.opacity(glow * 0.90), radius: CGFloat(4.0 + 12.0 * glow))
+                        .animation(.smooth(duration: 0.16), value: progress)
                 }
             }
         }
@@ -765,8 +768,8 @@ private struct SpicyLyricLine: View {
                             stops: [
                                 .init(color: .white, location: 0),
                                 .init(color: .white, location: max(0, targetPos)),
-                                .init(color: .white.opacity(0.35), location: min(1.0, targetPos + 0.20)),
-                                .init(color: .white.opacity(0.35), location: 1.0)
+                                .init(color: .white.opacity(0.38), location: min(1.0, targetPos + 0.20)),
+                                .init(color: .white.opacity(0.38), location: 1.0)
                             ],
                             startPoint: .leading,
                             endPoint: .trailing
@@ -781,8 +784,8 @@ private struct SpicyLyricLine: View {
                         )
                     }
                 )
-                .shadow(color: Color.white.opacity(0.50 * glowIntensity), radius: 10, x: 0, y: 0)
-                .shadow(color: Color.white.opacity(0.25 * glowIntensity), radius: 22, x: 0, y: 0)
+                .shadow(color: Color.white.opacity(0.55 * glowIntensity), radius: 10, x: 0, y: 0)
+                .shadow(color: Color.white.opacity(0.28 * glowIntensity), radius: 24, x: 0, y: 0)
         }
     }
 }
@@ -793,34 +796,43 @@ private struct SpicyInstrumentalDots: View {
     let isActive: Bool
 
     var body: some View {
-        HStack(spacing: 16) {
-            ForEach(0..<3, id: \.self) { dotIdx in
-                let dotStart = Double(dotIdx) / 3.0
-                let dotEnd = Double(dotIdx + 1) / 3.0
-                let isDotActive = progress >= dotStart && progress < dotEnd
-                let isDotSung = progress >= dotEnd
-                let dotProgress = isDotActive ? max(0, min(1.0, (progress - dotStart) / (dotEnd - dotStart))) : 0.0
+        if !isActive {
+            EmptyView()
+        } else {
+            HStack(spacing: 16) {
+                ForEach(0..<3, id: \.self) { dotIdx in
+                    let dotStart = Double(dotIdx) / 3.0
+                    let dotEnd = Double(dotIdx + 1) / 3.0
+                    let isDotActive = progress >= dotStart && progress < dotEnd
+                    let isDotSung = progress >= dotEnd
+                    let dotProgress = isDotActive ? max(0, min(1.0, (progress - dotStart) / (dotEnd - dotStart))) : 0.0
 
-                let bounce = isDotActive ? sin(dotProgress * .pi) : 0.0
-                let scale: CGFloat = isDotActive ? CGFloat(0.85 + 0.40 * bounce) : (isDotSung ? 1.05 : 0.85)
-                let yOffset: CGFloat = isDotActive ? CGFloat(-7.0 * bounce) : 0.0
-                let opacity: Double = isActive ? (isDotSung ? 1.0 : (isDotActive ? (0.45 + 0.55 * bounce) : 0.40)) : 0.25
-                let glow: Double = isDotActive ? bounce : 0.0
+                    // Fraktality Dot Spring physics from Spicy Lyrics 6.1.1:
+                    // DotScaleSpline: 0.75 -> 1.05 -> 1.0
+                    // DotYOffsetSpline: 0 -> -8.0pt -> 0
+                    // DotGlowSpline: 0 -> 1.0 -> 1.0
+                    // DotOpacitySpline: 0.35 -> 1.0 -> 1.0
+                    let bounce = isDotActive ? sin(dotProgress * .pi) : 0.0
+                    let scale: CGFloat = isDotActive ? CGFloat(0.75 + 0.30 * bounce) : (isDotSung ? 1.0 : 0.75)
+                    let yOffset: CGFloat = isDotActive ? CGFloat(-8.0 * bounce) : 0.0
+                    let opacity: Double = isDotSung ? 1.0 : (isDotActive ? (0.35 + 0.65 * bounce) : 0.35)
+                    let glow: Double = isDotActive ? bounce : (isDotSung ? 0.20 : 0.0)
 
-                Circle()
-                    .fill(Color.white.opacity(opacity))
-                    .frame(width: 12, height: 12)
-                    .scaleEffect(scale)
-                    .offset(y: yOffset)
-                    .shadow(color: Color.white.opacity(glow * 0.95), radius: CGFloat(4.0 + 8.0 * glow))
+                    Circle()
+                        .fill(Color.white.opacity(opacity))
+                        .frame(width: 14, height: 14)
+                        .scaleEffect(scale)
+                        .offset(y: yOffset)
+                        .shadow(color: Color.white.opacity(glow * 0.95), radius: CGFloat(4.0 + 8.0 * glow))
+                }
             }
+            // Pre-hidden vanishing collapse à 88% de la pause (Spicy Lyrics pre-hidden)
+            .scaleEffect(progress > 0.88 ? max(0, (1.0 - progress) / 0.12) : 1.0)
+            .opacity(progress > 0.88 ? max(0, (1.0 - progress) / 0.12) : 1.0)
+            .padding(.vertical, 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .animation(.spring(response: 0.35, dampingFraction: 0.65), value: progress)
         }
-        // Effondrement élastique (pre-hidden vanishing collapse) à 90% de la fin de pause
-        .scaleEffect(progress > 0.90 ? max(0, (1.0 - progress) / 0.10) : 1.0)
-        .opacity(progress > 0.90 ? max(0, (1.0 - progress) / 0.10) : 1.0)
-        .padding(.vertical, 14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .animation(.spring(response: 0.35, dampingFraction: 0.65), value: progress)
     }
 }
 

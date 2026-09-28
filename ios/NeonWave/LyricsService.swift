@@ -200,8 +200,8 @@ enum LyricsService {
         // Détecte les silences et intros instrumentales pour afficher les 3 points rebondissants
         var enriched: [LyricLine] = []
 
-        // 1. Intro instrumentale avant la première phrase
-        if let first = sorted.first, first.time >= 2.5 {
+        // 1. Intro instrumentale avant la première phrase (Spicy Lyrics getLyricsBetweenShow >= 2.0s)
+        if let first = sorted.first, first.time >= 2.0 {
             enriched.append(LyricLine(time: 0.0, text: "•••"))
         }
 
@@ -213,13 +213,13 @@ enum LyricsService {
                 let next = sorted[i + 1]
                 let gap = next.time - current.time
 
-                // 2. Pause / solo instrumental entre deux phrases (écart >= 4.2 secondes)
-                if gap >= 4.2 {
+                // 2. Pause / solo instrumental entre deux phrases (écart >= 3.0 secondes)
+                if gap >= 3.0 {
                     let wordCount = Double(max(1, current.text.split(separator: " ").count))
-                    let spokenDuration = min(gap - 2.0, max(1.8, min(3.8, wordCount * 0.28 + 0.8)))
+                    let spokenDuration = min(gap - 1.6, max(1.5, min(3.5, wordCount * 0.26 + 0.6)))
                     let pauseStart = current.time + spokenDuration
 
-                    if next.time - pauseStart >= 1.8 {
+                    if next.time - pauseStart >= 1.4 {
                         enriched.append(LyricLine(time: pauseStart, text: "•••"))
                     }
                 }
