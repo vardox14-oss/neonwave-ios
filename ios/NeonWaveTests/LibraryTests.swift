@@ -107,3 +107,40 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(item.duration, 158)
     }
 }
+
+
+final class SpicyWaveAnimationTests: XCTestCase {
+    func testSourceCurveKnotsAndEndpoints() {
+        XCTAssertEqual(SpicyWaveCurve.scale.value(at: 0), 0.95, accuracy: 1e-12)
+        XCTAssertEqual(SpicyWaveCurve.scale.value(at: 0.7), 1.0505, accuracy: 1e-12)
+        XCTAssertEqual(SpicyWaveCurve.letterScale.value(at: 0.7), 1.175, accuracy: 1e-12)
+        XCTAssertEqual(SpicyWaveCurve.lift.value(at: 0.9), -1.0 / 60, accuracy: 1e-12)
+        XCTAssertEqual(SpicyWaveCurve.letterLift.value(at: 0.9), -1.0 / 56, accuracy: 1e-12)
+        XCTAssertEqual(SpicyWaveCurve.glow.value(at: 0.15), 1, accuracy: 1e-12)
+        XCTAssertEqual(SpicyWaveCurve.glow.value(at: 0.6), 1, accuracy: 1e-12)
+        XCTAssertEqual(SpicyWaveCurve.scale.value(at: 2), 1, accuracy: 1e-12)
+        XCTAssertEqual(SpicyWaveCurve.glow.value(at: -1), 0, accuracy: 1e-12)
+    }
+
+    func testSpringIsIndependentOfDisplayRefreshRate() {
+        for (frequency, damping) in [(0.88, 0.64), (1.45, 0.40), (1.18, 0.56)] {
+            var sixty = SpicyWaveSpring(position: 0.95, frequency: frequency, damping: damping)
+            var oneTwenty = sixty
+            for _ in 0..<60 { sixty.step(goal: 1.175, dt: 1.0 / 60) }
+            for _ in 0..<120 { oneTwenty.step(goal: 1.175, dt: 1.0 / 120) }
+            XCTAssertEqual(sixty.position, oneTwenty.position, accuracy: 1e-10)
+            XCTAssertEqual(sixty.velocity, oneTwenty.velocity, accuracy: 1e-10)
+        }
+    }
+
+    func testSeekingClearsSpringMomentum() {
+        var spring = SpicyWaveSpring(position: 0.95, frequency: 0.88, damping: 0.64)
+        spring.step(goal: 1.175, dt: 0.1)
+        XCTAssertNotEqual(spring.velocity, 0)
+        spring.step(goal: 0.95, dt: 0, snap: true)
+        XCTAssertEqual(spring.position, 0.95)
+        XCTAssertEqual(spring.velocity, 0)
+        spring.step(goal: 0.95, dt: 1.0 / 60)
+        XCTAssertEqual(spring.position, 0.95, accuracy: 1e-12)
+    }
+}

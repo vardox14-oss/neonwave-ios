@@ -511,7 +511,8 @@ struct LyricsView: View {
                                             isSung: isSung,
                                             progress: progress,
                                             duration: lineDuration,
-                                            isWaveEffect: player.isWaveEffect
+                                            isWaveEffect: player.isWaveEffect,
+                                            isPlaying: player.isPlaying && !player.isBuffering
                                         )
                                     }
                                     .buttonStyle(PlainButtonStyle())
@@ -616,6 +617,8 @@ private struct SpicyLyricLine: View {
     let progress: Double
     let duration: Double
     let isWaveEffect: Bool
+    let isPlaying: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isInstrumental: Bool {
         let trimmed = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -635,7 +638,7 @@ private struct SpicyLyricLine: View {
 
     private var distanceBlur: CGFloat {
         if isActive { return 0.0 }
-        return CGFloat(min(Double(distance) * 2.2, 10.0)) // Spicy Lyrics BlurMultiplier
+        return CGFloat(min(Double(distance) * (isWaveEffect ? 1.25 : 2.2), 10.0)) // Spicy Lyrics BlurMultiplier
     }
 
     var body: some View {
@@ -654,132 +657,46 @@ private struct SpicyLyricLine: View {
         .padding(.vertical, isInstrumental ? 4 : 8)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(isActive && !isInstrumental ? Color.white.opacity(0.08) : Color.clear)
+                .fill(isActive && !isInstrumental && !isWaveEffect ? Color.white.opacity(0.08) : Color.clear)
                 .overlay(
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(isActive && !isInstrumental ? Color.white.opacity(0.12) : Color.clear, lineWidth: 1)
+                        .stroke(isActive && !isInstrumental && !isWaveEffect ? Color.white.opacity(0.12) : Color.clear, lineWidth: 1)
                 )
         )
-        .animation(.spring(response: 0.38, dampingFraction: 0.64), value: isActive)
+        .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.64), value: isActive)
         .contentShape(Rectangle())
     }
 
-    // ─── MODE 1 : VAGUE WATER & PHYSIQUE PAR MOT (Spicy Lyrics 6.1.1 exact splines) ─
-    @ViewBuilder
+    // Spicy Lyrics word curves, with estimated timing when only line timestamps exist.
+    // Keep the same layout before/during/after singing to avoid changing line wraps.
     private var syllableWaveView: some View {
-        if !isActive {
-            Text(line.text)
-                .font(.system(size: 26, weight: .bold, design: .rounded))
-                .tracking(-0.35)
-                .lineSpacing(6)
-                .multilineTextAlignment(.leading)
-                .foregroundStyle(Color.white.opacity(textOpacity))
-        } else {
-            let words = line.text.components(separatedBy: " ").filter { !$0.isEmpty }
-            let wordLengths = words.map { max(1, $0.count) }
-            let totalWeight = Double(wordLengths.reduce(0, +))
+        let words = line.text.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        let lengths = words.map { max(1, $0.count) }
+        let total = Double(max(1, lengths.reduce(0, +)))
+        let ranges: [WordTiming] = {
+            var cursor = 0.0
+            return lengths.map { length in
+                let start = cursor / total
+                cursor += Double(length)
+                return WordTiming(start: start, end: cursor / total)
+            }
+        }()
 
-            // Répartition pondérée du temps de chant sur chaque mot
-            let wordRanges: [WordTiming] = {
-                var res: [WordTiming] = []
-                var acc = 0.0
-                for len in wordLengths {
-                    let s = acc / totalWeight
-                    acc += Double(len)
-                    let e = acc / totalWeight
-                    res.append(WordTiming(start: s, end: e))
-                }
-                return res
-            }()
-
-            let activeWordIndex = words.indices.first(where: {
-                progress >= wordRanges[$0].start && progress < wordRanges[$0].end
-            }) ?? (progress >= 1.0 ? max(0, words.count - 1) : 0)
-            let currentRange = wordRanges.indices.contains(activeWordIndex)
-                ? wordRanges[activeWordIndex]
-                : WordTiming(start: 0.0, end: 1.0)
-            let span = max(0.0001, currentRange.end - currentRange.start)
-            // wordProgress 0→1 pour le mot actif courant
-            let wordProgress: Double = max(0.0, min(1.0, (progress - currentRange.start) / span))
-            let continuousWordPos: Double = Double(activeWordIndex) + wordProgress
-
-            FlowLayout(spacing: 7, lineSpacing: 7) {
-                ForEach(0..<words.count, id: \.self) { wordIndex in
-                    let wordText = words[wordIndex]
-                    let isCurrent = (wordIndex == activeWordIndex)
-                    let isPast = (Double(wordIndex) < continuousWordPos - 0.45)
-                    let distance = abs(Double(wordIndex) - continuousWordPos)
-
-                    // ── Spicy 6.1.1 ScaleSpline (asymétrique): 0.95 → 1.0505 (pic 70%) → 1.0
-                    let scalePeak: Double = {
-                        let p = wordProgress
-                        if p < 0.7 { return 0.95 + 0.1005 * (p / 0.7) }
-                        else { return 1.0505 - 0.0505 * ((p - 0.7) / 0.3) }
-                    }()
-
-                    // ── Spicy 6.1.1 YOffsetSpline: 0.01em → -1/60em (pic 90%) → 0
-                    // em × 26pt = pixels. Positif = bas, négatif = haut (ascension).
-                    let yOffsetEm: Double = {
-                        let p = wordProgress
-                        let peak = -(1.0 / 60.0)  // ≈ -0.01667em
-                        if p < 0.9 { return 0.01 + (peak - 0.01) * (p / 0.9) }
-                        else { return peak * (1.0 - (p - 0.9) / 0.1) }
-                    }()
-
-                    // ── Spicy 6.1.1 GlowSpline: 0 → 1 (pic 15-60%) → 0
-                    let glowPeak: Double = {
-                        let p = wordProgress
-                        if p < 0.15 { return p / 0.15 }
-                        else if p < 0.6 { return 1.0 }
-                        else { return 1.0 - (p - 0.6) / 0.4 }
-                    }()
-
-                    // ── Falloff Fraktality (Spicy line 1084-1085)
-                    let falloff     = 1.0 / (1.0 + pow(distance, 2.8))
-                    let glowFalloff = 1.0 / (1.0 + distance * 0.9)
-
-                    let scale: CGFloat = isCurrent
-                        ? CGFloat(scalePeak)
-                        : (isPast ? 1.0 : CGFloat(0.95 + 0.1005 * falloff))
-
-                    // yOffset en points (DefaultLyricsSize = 26pt)
-                    let yOffset: CGFloat = isCurrent
-                        ? CGFloat(yOffsetEm * 26.0)
-                        : (isPast ? 0.0 : CGFloat(-(1.0/60.0) * 26.0 * falloff))
-
-                    let glow: Double = isCurrent
-                        ? glowPeak
-                        : (isPast ? 0.20 : glowFalloff * 0.65)
-
-                    // ── Gradient sweep: easeSinOut(p) = sin(p*π/2), -20%→100%
-                    let easedGrad: Double = isCurrent ? sin(wordProgress * .pi / 2.0) : 0.0
-                    let gradPos:   Double = isCurrent ? (-0.20 + 1.20 * easedGrad) : (isPast ? 1.0 : -0.20)
-
-                    Text(wordText)
-                        .font(.system(size: 26, weight: .bold, design: .rounded))
-                        .tracking(-0.35)
-                        .scaleEffect(scale, anchor: .center)
-                        .offset(y: yOffset)
-                        .foregroundStyle(
-                            LinearGradient(
-                                stops: [
-                                    .init(color: .white, location: 0),
-                                    .init(color: .white, location: max(0, min(1.0, gradPos))),
-                                    .init(color: .white.opacity(0.40), location: max(0, min(1.0, gradPos + 0.22))),
-                                    .init(color: .white.opacity(0.40), location: 1.0)
-                                ],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .shadow(color: Color.white.opacity(glow * 0.90), radius: CGFloat(4.0 + 12.0 * glow))
-                        // easeOut mimique l'inertie du spring physique: accélère au début, ralentit en fin de mot
-                        .animation(.timingCurve(0.0, 0.0, 0.2, 1.0, duration: 0.18), value: wordProgress)
-                }
+        return FlowLayout(spacing: 7, lineSpacing: 7) {
+            ForEach(words.indices, id: \.self) { index in
+                let range = ranges[index]
+                let wordProgress = isActive
+                    ? (progress - range.start) / max(0.0001, range.end - range.start)
+                    : (isSung ? 1.0 : 0.0)
+                SpicyWaveWord(text: words[index], progress: wordProgress,
+                              duration: duration * (range.end - range.start),
+                              isActive: isActive, isPlaying: isPlaying)
             }
         }
+        .opacity(textOpacity)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(line.text)
     }
-
 
     // ─── MODE 2 : BALAYAGE PROGRESSIF CONTINU SANS BOÎTE (Line Mode) ─────────
     @ViewBuilder
@@ -826,6 +743,224 @@ private struct SpicyLyricLine: View {
                 .shadow(color: Color.white.opacity(0.55 * glowIntensity), radius: 10, x: 0, y: 0)
                 .shadow(color: Color.white.opacity(0.28 * glowIntensity), radius: 24, x: 0, y: 0)
         }
+    }
+}
+
+// Native port of Spicy Lyrics 6.1.1 LyricsAnimator.ts and Fraktality Spring.ts.
+// Audio updates anchor the clock; only the active line renders at display cadence.
+private struct SpicyWaveWord: View {
+    let text: String
+    let progress: Double
+    let duration: Double
+    let isActive: Bool
+    let isPlaying: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var anchorProgress = 0.0
+    @State private var anchorDate = Date()
+    @State private var previousFrame: Date?
+    @State private var word = SpicyWaveMotion()
+    @State private var letters: [SpicyWaveMotion] = []
+    @State private var displayedProgress = 0.0
+
+    private var characters: [String] { text.map(String.init) }
+    private var usesLetters: Bool {
+        // IsLetterCapable.ts: sustained words >= 1000ms. Keep cursive scripts joined.
+        duration >= 1 && !text.unicodeScalars.contains {
+            (0x0590...0x08FF).contains(Int($0.value))
+        }
+    }
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 60, paused: !isActive || !isPlaying || reduceMotion)) { timeline in
+            Group {
+                if usesLetters {
+                    HStack(spacing: 0) {
+                        ForEach(characters.indices, id: \.self) { index in
+                            let motion = letters.indices.contains(index) ? letters[index] : SpicyWaveMotion()
+                            let letterProgress = max(0, min(1, displayedProgress * Double(characters.count) - Double(index)))
+                            glyph(characters[index], motion: motion,
+                                  gradient: -0.20 + 1.20 * sin(letterProgress * .pi / 2),
+                                  sung: letterProgress >= 1, emphasis: true)
+                        }
+                    }
+                } else {
+                    glyph(text, motion: word, gradient: -0.20 + 1.20 * displayedProgress,
+                          sung: displayedProgress >= 1, emphasis: false)
+                }
+            }
+            .scaleEffect(reduceMotion || !usesLetters ? 1 : word.scale.position)
+            .offset(y: reduceMotion || !usesLetters ? 0 : 26 * word.lift.position)
+            .onChange(of: timeline.date) { _, date in advance(to: date) }
+        }
+        .onAppear { synchronize(reset: true) }
+        .onChange(of: progress) { old, new in
+            let jump = (new - old) * duration
+            synchronize(reset: jump < -0.08 || abs(jump) > 0.5)
+        }
+        .onChange(of: isActive) { _, _ in synchronize(reset: true) }
+        .onChange(of: isPlaying) { _, _ in synchronize(reset: false) }
+        .onChange(of: reduceMotion) { _, _ in synchronize(reset: true) }
+        .transaction { $0.animation = nil }
+    }
+
+    private func glyph(_ value: String, motion: SpicyWaveMotion, gradient: Double,
+                       sung: Bool, emphasis: Bool) -> some View {
+        let glow = isActive && !reduceMotion ? max(0, motion.glow.position) : 0
+        return Text(value)
+            .font(.system(size: 26, weight: .bold, design: .rounded))
+            .tracking(-0.35)
+            .foregroundStyle(Color.white.opacity(isActive ? 0.4 : 1))
+            .overlay {
+                Text(value)
+                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .tracking(-0.35)
+                    .foregroundStyle(.white)
+                    .mask {
+                        if sung { Color.white }
+                        else {
+                            LinearGradient(colors: [.white, .clear],
+                                           startPoint: UnitPoint(x: gradient, y: 0.5),
+                                           endPoint: UnitPoint(x: gradient + 0.20, y: 0.5))
+                        }
+                    }
+                    .opacity(isActive ? 1 : 0)
+            }
+            .shadow(color: .white.opacity(min(1, glow * (emphasis ? 1.85 : 0.35))),
+                    radius: 4 + (emphasis ? 12 : 2) * glow)
+            .scaleEffect(reduceMotion ? 1 : motion.scale.position)
+            .offset(y: reduceMotion ? 0 : 26 * (emphasis ? 2 : 1) * motion.lift.position)
+    }
+
+    private func synchronize(reset: Bool) {
+        anchorProgress = progress
+        anchorDate = Date()
+        if reset || letters.count != characters.count {
+            word = SpicyWaveMotion()
+            letters = characters.map { _ in SpicyWaveMotion() }
+            previousFrame = nil
+        }
+        advance(to: anchorDate, reset: reset)
+    }
+
+    private func advance(to date: Date, reset: Bool = false) {
+        let dt = min(0.05, max(0, previousFrame.map { date.timeIntervalSince($0) } ?? 0))
+        previousFrame = date
+        // Never extrapolate through a stall or buffering; re-anchor on every audio sample.
+        let extra = isActive && isPlaying ? min(0.3, max(0, date.timeIntervalSince(anchorDate))) : 0
+        let elapsed = anchorProgress * duration + extra
+        // Emphasize.ts releases the last letter 250ms before the word ends.
+        let animationDuration = max(0.05, duration - (usesLetters ? 0.25 : 0))
+        let p = max(0, min(1, elapsed / animationDuration))
+        displayedProgress = p
+        let snap = reset || !isActive || reduceMotion
+        word.update(scale: SpicyWaveCurve.scale.value(at: p),
+                    lift: SpicyWaveCurve.lift.value(at: p),
+                    glow: SpicyWaveCurve.glow.value(at: p), dt: dt, snap: snap)
+        guard usesLetters, !letters.isEmpty else { return }
+        let front = p * Double(letters.count)
+        let active = Int(front)
+        let local = front - Double(active)
+        for index in letters.indices {
+            var scale = 0.95
+            var lift = 0.01
+            var glow = 0.0
+            if p >= 1 { scale = 1; lift = 0 }
+            else if index <= active && elapsed >= 0 {
+                let distance = Double(abs(index - active))
+                let falloff = 1 / (1 + pow(distance, 2.8))
+                let glowFalloff = 1 / (1 + distance * 0.9)
+                scale += (SpicyWaveCurve.letterScale.value(at: local) - 0.95) * falloff
+                lift += (SpicyWaveCurve.letterLift.value(at: local) - 0.01) * falloff
+                glow = SpicyWaveCurve.glow.value(at: local) * glowFalloff
+            }
+            letters[index].update(scale: scale, lift: lift, glow: glow, dt: dt, snap: snap)
+        }
+    }
+}
+
+struct SpicyWaveMotion {
+    var scale = SpicyWaveSpring(position: 0.95, frequency: 0.88, damping: 0.64)
+    var lift = SpicyWaveSpring(position: 0.01, frequency: 1.45, damping: 0.40)
+    var glow = SpicyWaveSpring(position: 0, frequency: 1.18, damping: 0.56)
+
+    mutating func update(scale: Double, lift: Double, glow: Double, dt: Double, snap: Bool) {
+        self.scale.step(goal: scale, dt: dt, snap: snap)
+        self.lift.step(goal: lift, dt: dt, snap: snap)
+        self.glow.step(goal: glow, dt: dt, snap: snap)
+    }
+}
+
+// Fraktality spr, MIT License, original copyright Fraktality.
+// Exact underdamped branch used by all three Spicy Lyrics vocal springs.
+struct SpicyWaveSpring {
+    var position: Double
+    let frequency: Double
+    let damping: Double
+    var velocity = 0.0
+
+    mutating func step(goal: Double, dt: Double, snap: Bool = false) {
+        if snap { position = goal; velocity = 0; return }
+        let f = frequency * 2 * Double.pi
+        let c = sqrt(1 - damping * damping)
+        let decay = exp(-damping * f * dt)
+        let cosine = cos(dt * f * c)
+        let sine = sin(dt * f * c)
+        let z = sine / c
+        let y = sine / (f * c)
+        let offset = position - goal
+        position = (offset * (cosine + z * damping) + velocity * y) * decay + goal
+        velocity = (velocity * (cosine - z * damping) - offset * z * f) * decay
+    }
+}
+
+struct SpicyWaveCurve {
+    let times: [Double]
+    let values: [Double]
+    let secondDerivatives: [Double]
+
+    static let scale = SpicyWaveCurve(times: [0, 0.7, 1], values: [0.95, 1.0505, 1])
+    static let letterScale = SpicyWaveCurve(times: [0, 0.7, 1], values: [0.95, 1.175, 1])
+    static let letterLift = SpicyWaveCurve(times: [0, 0.9, 1], values: [0.01, -1.0 / 56, 0])
+    static let lift = SpicyWaveCurve(times: [0, 0.9, 1], values: [0.01, -1.0 / 60, 0])
+    static let glow = SpicyWaveCurve(times: [0, 0.15, 0.6, 1], values: [0, 1, 1, 0])
+
+    // Natural cubic spline, matching the cubic-spline package used by Spicy Lyrics.
+    init(times: [Double], values: [Double]) {
+        self.times = times
+        self.values = values
+        let count = times.count
+        var diagonal = Array(repeating: 0.0, count: count)
+        var right = Array(repeating: 0.0, count: count)
+        var derivatives = Array(repeating: 0.0, count: count)
+        diagonal[0] = 1
+        diagonal[count - 1] = 1
+        for i in 1..<(count - 1) {
+            let leftWidth = times[i] - times[i - 1]
+            let rightWidth = times[i + 1] - times[i]
+            let factor = leftWidth / diagonal[i - 1]
+            let previousUpper = i == 1 ? 0 : leftWidth
+            diagonal[i] = 2 * (leftWidth + rightWidth) - factor * previousUpper
+            let slopeChange = (values[i + 1] - values[i]) / rightWidth
+                - (values[i] - values[i - 1]) / leftWidth
+            right[i] = 6 * slopeChange - factor * right[i - 1]
+        }
+        for i in stride(from: count - 2, through: 1, by: -1) {
+            let width = times[i + 1] - times[i]
+            derivatives[i] = (right[i] - width * derivatives[i + 1]) / diagonal[i]
+        }
+        secondDerivatives = derivatives
+    }
+
+    func value(at progress: Double) -> Double {
+        let p = max(times[0], min(times[times.count - 1], progress))
+        let upper = times.indices.dropFirst().first(where: { times[$0] >= p }) ?? (times.count - 1)
+        let lower = upper - 1
+        let width = times[upper] - times[lower]
+        let a = (times[upper] - p) / width
+        let b = (p - times[lower]) / width
+        return a * values[lower] + b * values[upper]
+            + ((a * a * a - a) * secondDerivatives[lower]
+               + (b * b * b - b) * secondDerivatives[upper]) * width * width / 6
     }
 }
 
