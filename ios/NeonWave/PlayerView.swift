@@ -170,54 +170,61 @@ struct PlayerView: View {
         if let track = player.current {
             ZStack {
                 NW.background
-                if let canvasURL = canvasURL {
-                    LoopingCanvasVideo(url: canvasURL, isPlaying: player.isPlaying)
-                        .frame(width: size.width, height: size.height)
-                        .clipped()
-                        .transition(.opacity)
 
-                    LinearGradient(
-                        colors: [
-                            .black.opacity(0.35),
-                            .black.opacity(0.05),
-                            .black.opacity(0.40),
-                            .black.opacity(0.80),
-                            NW.background
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                } else {
+                // 1. Fond vibrant basé sur la pochette (toujours présent en arrière-plan)
+                Group {
                     if let localArt = library.artworkURL(track), let image = UIImage(contentsOfFile: localArt.path) {
                         Image(uiImage: image)
                             .resizable()
                             .scaledToFill()
                             .frame(width: size.width, height: size.height)
-                            .clipped()
-                            .frame(width: size.width, height: size.height)
-                            .scaleEffect(1.4)
-                            .blur(radius: 72)
-                            .opacity(0.38)
+                            .scaleEffect(1.35)
+                            .blur(radius: 54)
+                            .opacity(0.72)
                             .clipped()
                     } else {
-                        AsyncImage(url: track.artworkURL.flatMap(URL.init(string:))) { image in
-                            image
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: size.width, height: size.height)
-                                .clipped()
-                        } placeholder: {
-                            LinearGradient(colors: NW.colors[track.colorIndex], startPoint: .topLeading, endPoint: .bottomTrailing)
+                        AsyncImage(url: track.artworkURL.flatMap(URL.init(string:))) { phase in
+                            switch phase {
+                            case .success(let image):
+                                image
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: size.width, height: size.height)
+                                    .scaleEffect(1.35)
+                                    .blur(radius: 54)
+                                    .opacity(0.72)
+                                    .clipped()
+                            default:
+                                LinearGradient(colors: NW.colors[track.colorIndex],
+                                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                            }
                         }
                         .frame(width: size.width, height: size.height)
-                        .scaleEffect(1.4)
-                        .blur(radius: 72)
-                        .opacity(0.38)
                         .clipped()
                     }
+                }
 
-                    LinearGradient(colors: [.black.opacity(0.12), NW.background.opacity(0.72), NW.background], startPoint: .top, endPoint: .bottom)
-                    RadialGradient(colors: [NW.colors[track.colorIndex][0].opacity(0.19), .clear], center: .topTrailing, startRadius: 20, endRadius: 390)
+                RadialGradient(colors: [NW.colors[track.colorIndex][0].opacity(0.35), .clear], center: .topTrailing, startRadius: 40, endRadius: 460)
+                LinearGradient(colors: [.black.opacity(0.15), .black.opacity(0.40), NW.background.opacity(0.85)], startPoint: .top, endPoint: .bottom)
+
+                // 2. Vidéo Canvas par-dessus quand elle est prête
+                if let canvasURL = canvasURL {
+                    LoopingCanvasVideo(url: canvasURL, isPlaying: player.isPlaying)
+                        .frame(width: size.width, height: size.height)
+                        .clipped()
+                        .transition(.opacity.animation(.easeInOut(duration: 0.6)))
+
+                    LinearGradient(
+                        colors: [
+                            .black.opacity(0.30),
+                            .black.opacity(0.05),
+                            .black.opacity(0.35),
+                            .black.opacity(0.75),
+                            NW.background.opacity(0.92)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
                 }
             }
             .frame(width: size.width, height: size.height)

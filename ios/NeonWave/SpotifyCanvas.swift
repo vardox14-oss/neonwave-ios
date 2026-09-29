@@ -79,7 +79,7 @@ struct LoopingCanvasVideo: UIViewRepresentable {
 
     func makeUIView(context: Context) -> LoopingCanvasUIView {
         let view = LoopingCanvasUIView()
-        view.backgroundColor = .black
+        view.backgroundColor = .clear
         context.coordinator.load(url, in: view)
         if isPlaying { context.coordinator.player?.play() }
         return view
