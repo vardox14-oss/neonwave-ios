@@ -51,19 +51,37 @@ struct LyricWord: Hashable {
     let text: String
     let start: Double
     let end: Double?
+    var isBackground: Bool = false
 }
 
 struct LyricLine: Identifiable, Hashable {
-    let id = UUID()
+    let id: UUID
     let time: Double
     let text: String
-    var words: [LyricWord] = []
+    var words: [LyricWord]
+    var isBackground: Bool
+
+    init(id: UUID = UUID(), time: Double, text: String, words: [LyricWord] = [], isBackground: Bool? = nil) {
+        self.id = id
+        self.time = time
+        self.text = text
+        self.words = words
+        if let isBackground {
+            self.isBackground = isBackground
+        } else {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            self.isBackground = (trimmed.hasPrefix("(") && trimmed.hasSuffix(")")) ||
+                                (trimmed.hasPrefix("[") && trimmed.hasSuffix("]"))
+        }
+    }
 
     func animationWords(duration: Double) -> [LyricWord] {
         if !words.isEmpty {
             return words.map { word in
-                LyricWord(text: word.text, start: word.start,
-                          end: word.end ?? max(word.start + 0.05, time + duration))
+                let wordBack = word.isBackground || self.isBackground || (word.text.hasPrefix("(") && word.text.hasSuffix(")"))
+                return LyricWord(text: word.text, start: word.start,
+                                 end: word.end ?? max(word.start + 0.05, time + duration),
+                                 isBackground: wordBack)
             }
         }
         // Plain LRC supplies no word durations. Preserve the full phrase interval;
@@ -71,10 +89,14 @@ struct LyricLine: Identifiable, Hashable {
         let tokens = text.split(whereSeparator: { $0.isWhitespace }).map(String.init)
         let total = Double(max(1, tokens.reduce(0) { $0 + $1.count }))
         var cursor = time
+        var insideParen = false
         return tokens.map { token in
             let start = cursor
             cursor += duration * Double(token.count) / total
-            return LyricWord(text: token, start: start, end: cursor)
+            if token.hasPrefix("(") { insideParen = true }
+            let wordBack = self.isBackground || insideParen || token.hasPrefix("(") || token.hasSuffix(")")
+            if token.hasSuffix(")") { insideParen = false }
+            return LyricWord(text: token, start: start, end: cursor, isBackground: wordBack)
         }
     }
 }

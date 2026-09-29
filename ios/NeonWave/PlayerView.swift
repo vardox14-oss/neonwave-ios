@@ -649,7 +649,7 @@ private struct SpicyLyricLine: View {
         .scaleEffect(isInstrumental ? 1.0 : textScale, anchor: .leading)
         .blur(radius: isInstrumental ? 0.0 : distanceBlur)
         .padding(.horizontal, 12)
-        .padding(.vertical, isInstrumental ? 4 : 8)
+        .padding(.vertical, isInstrumental ? 4 : (line.isBackground ? 3 : 8))
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(isActive && !isInstrumental && !isWaveEffect ? Color.white.opacity(0.08) : Color.clear)
@@ -675,7 +675,8 @@ private struct SpicyLyricLine: View {
                     : (isSung ? 1.0 : 0.0)
                 SpicyWaveWord(text: word.text, progress: wordProgress,
                               duration: wordDuration,
-                              isActive: isActive, isPlaying: isPlaying)
+                              isActive: isActive, isPlaying: isPlaying,
+                              isBackground: word.isBackground || line.isBackground)
             }
         }
         .opacity(textOpacity)
@@ -686,19 +687,21 @@ private struct SpicyLyricLine: View {
     // ─── MODE 2 : BALAYAGE PROGRESSIF CONTINU SANS BOÎTE (Line Mode) ─────────
     @ViewBuilder
     private var lineSweepView: some View {
+        let fontSize: CGFloat = line.isBackground ? 19.5 : 26
+        let fontWeight: Font.Weight = line.isBackground ? .semibold : .bold
         if !isActive {
             Text(line.text)
-                .font(.system(size: 26, weight: .bold, design: .rounded))
+                .font(.system(size: fontSize, weight: fontWeight, design: .rounded))
                 .tracking(-0.35)
                 .lineSpacing(6)
                 .multilineTextAlignment(.leading)
-                .foregroundStyle(Color.white.opacity(textOpacity))
+                .foregroundStyle(Color.white.opacity(line.isBackground ? textOpacity * 0.75 : textOpacity))
         } else {
             let targetPos = -0.20 + 1.20 * progress
             let glowIntensity = sin(progress * .pi)
 
             Text(line.text)
-                .font(.system(size: 26, weight: .bold, design: .rounded))
+                .font(.system(size: fontSize, weight: fontWeight, design: .rounded))
                 .tracking(-0.35)
                 .lineSpacing(6)
                 .multilineTextAlignment(.leading)
@@ -717,7 +720,7 @@ private struct SpicyLyricLine: View {
                         )
                         .mask(
                             Text(line.text)
-                                .font(.system(size: 26, weight: .bold, design: .rounded))
+                                .font(.system(size: fontSize, weight: fontWeight, design: .rounded))
                                 .tracking(-0.35)
                                 .lineSpacing(6)
                                 .multilineTextAlignment(.leading)
@@ -725,8 +728,8 @@ private struct SpicyLyricLine: View {
                         )
                     }
                 )
-                .shadow(color: Color.white.opacity(0.55 * glowIntensity), radius: 10, x: 0, y: 0)
-                .shadow(color: Color.white.opacity(0.28 * glowIntensity), radius: 24, x: 0, y: 0)
+                .shadow(color: Color.white.opacity((line.isBackground ? 0.35 : 0.55) * glowIntensity), radius: 10, x: 0, y: 0)
+                .shadow(color: Color.white.opacity((line.isBackground ? 0.18 : 0.28) * glowIntensity), radius: 24, x: 0, y: 0)
         }
     }
 }
@@ -739,6 +742,7 @@ private struct SpicyWaveWord: View {
     let duration: Double
     let isActive: Bool
     let isPlaying: Bool
+    var isBackground: Bool = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var anchorProgress = 0.0
     @State private var anchorDate = Date()
@@ -772,7 +776,7 @@ private struct SpicyWaveWord: View {
                 }
             }
             .scaleEffect(reduceMotion || !usesLetters ? 1 : word.scale.position)
-            .offset(y: reduceMotion || !usesLetters ? 0 : 26 * word.lift.position)
+            .offset(y: reduceMotion || !usesLetters ? 0 : (isBackground ? 19.5 : 26) * word.lift.position)
             .onChange(of: timeline.date) { _, date in advance(to: date) }
         }
         .onAppear { synchronize(reset: true) }
@@ -789,13 +793,16 @@ private struct SpicyWaveWord: View {
     private func glyph(_ value: String, motion: SpicyWaveMotion, gradient: Double,
                        sung: Bool, emphasis: Bool) -> some View {
         let glow = isActive && !reduceMotion ? max(0, motion.glow.position) : 0
+        let fontSize: CGFloat = isBackground ? 19.5 : 26
+        let fontWeight: Font.Weight = isBackground ? .semibold : .bold
+        let baseAlpha: Double = isActive ? (isBackground ? 0.35 : 0.4) : (isBackground ? 0.75 : 1)
         return Text(value)
-            .font(.system(size: 26, weight: .bold, design: .rounded))
+            .font(.system(size: fontSize, weight: fontWeight, design: .rounded))
             .tracking(-0.35)
-            .foregroundStyle(Color.white.opacity(isActive ? 0.4 : 1))
+            .foregroundStyle(Color.white.opacity(baseAlpha))
             .overlay {
                 Text(value)
-                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .font(.system(size: fontSize, weight: fontWeight, design: .rounded))
                     .tracking(-0.35)
                     .foregroundStyle(.white)
                     .mask {
@@ -806,12 +813,12 @@ private struct SpicyWaveWord: View {
                                            endPoint: UnitPoint(x: gradient + 0.20, y: 0.5))
                         }
                     }
-                    .opacity(isActive ? 1 : 0)
+                    .opacity(isActive ? (isBackground ? 0.85 : 1) : 0)
             }
-            .shadow(color: .white.opacity(min(1, glow * (emphasis ? 1.85 : 0.35))),
+            .shadow(color: .white.opacity(min(1, glow * (isBackground ? 0.25 : (emphasis ? 1.85 : 0.35)))),
                     radius: 4 + (emphasis ? 12 : 2) * glow)
             .scaleEffect(reduceMotion ? 1 : motion.scale.position)
-            .offset(y: reduceMotion ? 0 : 26 * (emphasis ? 2 : 1) * motion.lift.position)
+            .offset(y: reduceMotion ? 0 : fontSize * (emphasis ? 2 : 1) * motion.lift.position)
     }
 
     private func synchronize(reset: Bool) {
