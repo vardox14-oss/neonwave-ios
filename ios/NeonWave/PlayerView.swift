@@ -489,53 +489,21 @@ struct LyricsView: View {
                         } else if !player.lyrics.isEmpty {
                             Color.clear.frame(height: 110)
                             ForEach(Array(player.lyrics.enumerated()), id: \.element.id) { index, line in
-                                let activeLeadIndex = player.activeLyricIndex ?? -1
-                                let currentPos = max(0, player.elapsed - player.lyricsOffset)
-
-                                let lineStartTime = line.time
-                                let nextLeadLine = player.lyrics[(index + 1)...].first(where: { !$0.isBackground })
-                                let defaultEndTime = nextLeadLine?.time ?? (lineStartTime + 4.5)
-                                let lineEndTime = max(lineStartTime + 0.5, line.endTime ?? defaultEndTime)
-                                let lineDuration = max(0.5, lineEndTime - lineStartTime)
-
-                                let isActive: Bool
-                                let isSung: Bool
-
-                                if line.isBackground {
-                                    // Backing vocal: active while singing in parallel with the main phrase
-                                    isActive = (currentPos >= lineStartTime && currentPos < lineEndTime)
-                                    isSung = (currentPos >= lineEndTime)
-                                } else {
-                                    // Lead vocal: active throughout its phrase window, including when backs sing
-                                    if index == activeLeadIndex {
-                                        isActive = (currentPos >= lineStartTime && currentPos < lineEndTime)
-                                        isSung = (currentPos >= lineEndTime)
-                                    } else if index < activeLeadIndex {
-                                        isActive = false
-                                        isSung = true
-                                    } else {
-                                        isActive = (currentPos >= lineStartTime && currentPos < lineEndTime)
-                                        isSung = false
-                                    }
-                                }
-
-                                let distance = isActive ? 0 : abs(index - activeLeadIndex)
-                                let elapsedInLine = max(0, currentPos - lineStartTime)
-                                let progress = max(0, min(1.0, elapsedInLine / lineDuration))
+                                let state = lineState(for: index, line: line, currentPos: max(0, player.elapsed - player.lyricsOffset), activeLeadIndex: player.activeLyricIndex ?? -1)
                                 let isDot = (line.text == "•••" || line.text == "..." || line.text == "♪")
 
-                                if !isDot || isActive {
+                                if !isDot || state.isActive {
                                     Button {
                                         player.seek(to: line)
                                         library.haptic()
                                     } label: {
                                         SpicyLyricLine(
                                             line: line,
-                                            distance: distance,
-                                            isActive: isActive,
-                                            isSung: isSung,
-                                            progress: progress,
-                                            duration: lineDuration,
+                                            distance: state.distance,
+                                            isActive: state.isActive,
+                                            isSung: state.isSung,
+                                            progress: state.progress,
+                                            duration: state.duration,
                                             isWaveEffect: player.isWaveEffect,
                                             isPlaying: player.isPlaying && !player.isBuffering
                                         )
@@ -626,6 +594,56 @@ struct LyricsView: View {
             }
         }
     }
+
+    private func lineState(for index: Int, line: LyricLine, currentPos: Double, activeLeadIndex: Int) -> LyricLineState {
+        let lineStartTime = line.time
+        let defaultEndTime: Double
+        if index + 1 < player.lyrics.count {
+            defaultEndTime = player.lyrics[(index + 1)...].first(where: { !$0.isBackground })?.time ?? (lineStartTime + 4.5)
+        } else {
+            defaultEndTime = lineStartTime + 4.5
+        }
+        let lineEndTime = max(lineStartTime + 0.5, line.endTime ?? defaultEndTime)
+        let lineDuration = max(0.5, lineEndTime - lineStartTime)
+
+        let isActive: Bool
+        let isSung: Bool
+        if line.isBackground {
+            isActive = (currentPos >= lineStartTime && currentPos < lineEndTime)
+            isSung = (currentPos >= lineEndTime)
+        } else {
+            if index == activeLeadIndex {
+                isActive = (currentPos >= lineStartTime && currentPos < lineEndTime)
+                isSung = (currentPos >= lineEndTime)
+            } else if index < activeLeadIndex {
+                isActive = false
+                isSung = true
+            } else {
+                isActive = (currentPos >= lineStartTime && currentPos < lineEndTime)
+                isSung = false
+            }
+        }
+
+        let distance = isActive ? 0 : abs(index - activeLeadIndex)
+        let elapsedInLine = max(0, currentPos - lineStartTime)
+        let progress = max(0, min(1.0, elapsedInLine / lineDuration))
+
+        return LyricLineState(
+            isActive: isActive,
+            isSung: isSung,
+            progress: progress,
+            duration: lineDuration,
+            distance: distance
+        )
+    }
+}
+
+private struct LyricLineState {
+    let isActive: Bool
+    let isSung: Bool
+    let progress: Double
+    let duration: Double
+    let distance: Int
 }
 
 // ─── LIGNE DE PAROLE EXACT SPICY LYRICS 6.1.1 ──────────────────────────────
