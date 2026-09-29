@@ -649,7 +649,7 @@ private struct SpicyLyricLine: View {
         .scaleEffect(isInstrumental ? 1.0 : textScale, anchor: .leading)
         .blur(radius: isInstrumental ? 0.0 : distanceBlur)
         .padding(.horizontal, 12)
-        .padding(.vertical, isInstrumental ? 4 : (line.isBackground ? 3 : 8))
+        .padding(.vertical, isInstrumental ? 4 : (line.isBackground ? 2 : 8))
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(isActive && !isInstrumental && !isWaveEffect ? Color.white.opacity(0.08) : Color.clear)
@@ -666,7 +666,7 @@ private struct SpicyLyricLine: View {
     // Keep the same layout before/during/after singing to avoid changing line wraps.
     private var syllableWaveView: some View {
         let words = line.animationWords(duration: duration)
-        return FlowLayout(spacing: 7, lineSpacing: 7) {
+        return FlowLayout(spacing: line.isBackground ? 5 : 7, lineSpacing: line.isBackground ? 4 : 7) {
             ForEach(words.indices, id: \.self) { index in
                 let word = words[index]
                 let wordDuration = max(0.001, (word.end ?? (line.time + duration)) - word.start)

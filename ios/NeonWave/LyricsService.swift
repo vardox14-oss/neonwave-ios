@@ -177,6 +177,8 @@ enum LyricsService {
             offset = milliseconds / 1000
         }
 
+        let trailingBackRegex = try? NSRegularExpression(pattern: #"^(.*?)\s*[\(\[]([^\)\]]+)[\)\]]\s*$"#)
+
         var result: [LyricLine] = []
         for rawLine in lrc.components(separatedBy: .newlines) {
             let matches = regex.matches(in: rawLine, range: NSRange(rawLine.startIndex..., in: rawLine))
@@ -199,12 +201,54 @@ enum LyricsService {
                 let firstSeconds = Range(first.range(at: 2), in: rawLine).flatMap { Double(rawLine[$0]) } ?? seconds
                 let shift = lineTime - max(0, firstMinutes * 60 + firstSeconds + offset)
                 let words = enhanced.words.map {
-                    LyricWord(text: $0.text, start: $0.start + shift, end: $0.end.map { $0 + shift })
+                    LyricWord(text: $0.text, start: $0.start + shift, end: $0.end.map { $0 + shift }, isBackground: $0.isBackground)
                 }
+
+                // Check for trailing or complete parenthesized backing vocal (e.g. "(Mathafack)" or "Wesh... (oh, mathafuck)")
+                if let trailingBackRegex,
+                   let backMatch = trailingBackRegex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+                   let leadRange = Range(backMatch.range(at: 1), in: text),
+                   let backRange = Range(backMatch.range(at: 2), in: text) {
+                    let lead = String(text[leadRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+                    let back = String(text[backRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+
+                    if !lead.isEmpty && !back.isEmpty {
+                        // Split into lead line and backing line
+                        if !words.isEmpty {
+                            let parenIndex = words.firstIndex { $0.text.contains("(") || $0.text.contains("[") }
+                            if let parenIndex, parenIndex > 0 {
+                                let leadWords = Array(words[..<parenIndex])
+                                let backWords = words[parenIndex...].map {
+                                    LyricWord(text: cleanLyricToken($0.text), start: $0.start, end: $0.end, isBackground: true)
+                                }
+                                let backTime = backWords.first?.start ?? (lineTime + 1.2)
+                                result.append(LyricLine(time: lineTime, text: lead, words: leadWords, isBackground: false))
+                                result.append(LyricLine(time: backTime, text: back, words: backWords, isBackground: true))
+                                continue
+                            }
+                        }
+                        result.append(LyricLine(time: lineTime, text: lead, words: [], isBackground: false))
+                        result.append(LyricLine(time: lineTime + 1.2, text: back, words: [], isBackground: true))
+                        continue
+                    } else if !back.isEmpty {
+                        // Entire line was parenthesized: e.g. "(Mathafack)"
+                        let cleanWords = words.map {
+                            LyricWord(text: cleanLyricToken($0.text), start: $0.start, end: $0.end, isBackground: true)
+                        }
+                        result.append(LyricLine(time: lineTime, text: back, words: cleanWords, isBackground: true))
+                        continue
+                    }
+                }
+
                 result.append(LyricLine(time: lineTime, text: text, words: words))
             }
         }
-        let sorted = result.sorted { $0.time < $1.time }
+        let sorted = result.enumerated().sorted { (a, b) in
+            if abs(a.element.time - b.element.time) > 1e-6 {
+                return a.element.time < b.element.time
+            }
+            return a.offset < b.offset
+        }.map(\.element)
         guard !sorted.isEmpty else { return [] }
         guard insertInterludes else { return sorted }
 
@@ -252,6 +296,14 @@ enum LyricsService {
             }
         }
         return (plain, words)
+    }
+
+    private static func cleanLyricToken(_ text: String) -> String {
+        text.replacingOccurrences(of: "(", with: "")
+            .replacingOccurrences(of: ")", with: "")
+            .replacingOccurrences(of: "[", with: "")
+            .replacingOccurrences(of: "]", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func normalized(_ value: String) -> String {

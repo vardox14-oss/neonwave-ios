@@ -198,4 +198,25 @@ final class SpicyWaveAnimationTests: XCTestCase {
         spring.step(goal: 0.95, dt: 1.0 / 60)
         XCTAssertEqual(spring.position, 0.95, accuracy: 1e-12)
     }
+
+    func testBackingVocalsParenthesesStripped() {
+        let line = LyricLine(time: 10, text: "(Mathafack)")
+        XCTAssertTrue(line.isBackground)
+        XCTAssertEqual(line.text, "Mathafack")
+        let words = line.animationWords(duration: 2)
+        XCTAssertEqual(words.map(\.text), ["Mathafack"])
+        XCTAssertTrue(words.allSatisfy(\.isBackground))
+    }
+
+    func testTrailingBackingVocalsSplitOntoSeparateLine() {
+        let lrc = "[00:10.00]Wesh alors, ma race, tranquille ou quoi (oh, mathafuck)\n[00:15.00]Deuxième ligne"
+        let lines = LyricsService.parseLRC(lrc)
+        XCTAssertEqual(lines.count, 3)
+        XCTAssertEqual(lines[0].text, "Wesh alors, ma race, tranquille ou quoi")
+        XCTAssertFalse(lines[0].isBackground)
+        XCTAssertEqual(lines[1].text, "oh, mathafuck")
+        XCTAssertTrue(lines[1].isBackground)
+        XCTAssertEqual(lines[2].text, "Deuxième ligne")
+        XCTAssertFalse(lines[2].isBackground)
+    }
 }
