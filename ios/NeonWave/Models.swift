@@ -57,13 +57,15 @@ struct LyricWord: Hashable {
 struct LyricLine: Identifiable, Hashable {
     let id: UUID
     let time: Double
+    var endTime: Double?
     let text: String
     var words: [LyricWord]
     var isBackground: Bool
 
-    init(id: UUID = UUID(), time: Double, text: String, words: [LyricWord] = [], isBackground: Bool? = nil) {
+    init(id: UUID = UUID(), time: Double, endTime: Double? = nil, text: String, words: [LyricWord] = [], isBackground: Bool? = nil) {
         self.id = id
         self.time = time
+        self.endTime = endTime
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let isParenWrapped = (trimmed.hasPrefix("(") && trimmed.hasSuffix(")")) ||
                              (trimmed.hasPrefix("[") && trimmed.hasSuffix("]"))

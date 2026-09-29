@@ -219,4 +219,15 @@ final class SpicyWaveAnimationTests: XCTestCase {
         XCTAssertEqual(lines[2].text, "Deuxième ligne")
         XCTAssertFalse(lines[2].isBackground)
     }
+
+    func testBackingVocalsConcurrentPhraseOverlap() {
+        let lrc = "[00:10.00]Wesh alors, ma race, tranquille ou quoi (oh, mathafuck)\n[00:15.00]Deuxième ligne"
+        let lines = LyricsService.parseLRC(lrc)
+        let lead = lines[0]
+        let back = lines[1]
+        XCTAssertEqual(lead.endTime, 15.0)
+        XCTAssertEqual(back.endTime, 15.0)
+        XCTAssertGreaterThan(back.time, lead.time)
+        XCTAssertLessThan(back.time, 15.0)
+    }
 }

@@ -597,7 +597,8 @@ private final class SilentAudioKeepAlive {
 
     private func updateActiveLyric() {
         guard !lyrics.isEmpty else { activeLyricIndex = nil; return }
-        activeLyricIndex = lyrics.lastIndex(where: { $0.time + lyricsOffset <= elapsed })
+        let pos = elapsed - lyricsOffset
+        activeLyricIndex = lyrics.lastIndex(where: { !$0.isBackground && $0.time <= pos }) ?? lyrics.lastIndex(where: { $0.time <= pos })
     }
 
     func adjustLyricsOffset(by delta: Double) {

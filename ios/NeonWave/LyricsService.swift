@@ -243,13 +243,42 @@ enum LyricsService {
                 result.append(LyricLine(time: lineTime, text: text, words: words))
             }
         }
-        let sorted = result.enumerated().sorted { (a, b) in
+        var sorted = result.enumerated().sorted { (a, b) in
             if abs(a.element.time - b.element.time) > 1e-6 {
                 return a.element.time < b.element.time
             }
             return a.offset < b.offset
         }.map(\.element)
         guard !sorted.isEmpty else { return [] }
+
+        // Compute end times and calibrate concurrent singing for backing vocals
+        for i in sorted.indices {
+            let line = sorted[i]
+            let nextLead = sorted[(i + 1)...].first(where: { !$0.isBackground })
+            let nextLeadTime = nextLead?.time
+            let phraseEndTime = nextLeadTime ?? (line.time + 4.5)
+
+            if sorted[i].isBackground && sorted[i].words.isEmpty {
+                // If it's a plain LRC backing line split from the preceding lead line,
+                // adjust its start time so it begins in the second half of the phrase
+                if i > 0 && !sorted[i - 1].isBackground {
+                    let lead = sorted[i - 1]
+                    let duration = max(2.0, phraseEndTime - lead.time)
+                    let ratio = Double(lead.text.count) / Double(max(1, lead.text.count + sorted[i].text.count))
+                    let backStart = lead.time + duration * min(0.75, max(0.50, ratio))
+                    sorted[i] = LyricLine(id: sorted[i].id, time: backStart, endTime: phraseEndTime, text: sorted[i].text, words: [], isBackground: true)
+                } else if sorted[i].endTime == nil {
+                    sorted[i].endTime = phraseEndTime
+                }
+            } else if sorted[i].endTime == nil {
+                if !sorted[i].words.isEmpty {
+                    sorted[i].endTime = sorted[i].words.compactMap(\.end).max() ?? phraseEndTime
+                } else {
+                    sorted[i].endTime = phraseEndTime
+                }
+            }
+        }
+
         guard insertInterludes else { return sorted }
 
         // LRC timestamps mark line starts, not vocal ends. A long gap can be a

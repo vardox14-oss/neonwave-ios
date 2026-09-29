@@ -489,13 +489,38 @@ struct LyricsView: View {
                         } else if !player.lyrics.isEmpty {
                             Color.clear.frame(height: 110)
                             ForEach(Array(player.lyrics.enumerated()), id: \.element.id) { index, line in
-                                let activeIndex = player.activeLyricIndex ?? -1
-                                let isActive = index == activeIndex
-                                let isSung = !isActive && index < activeIndex
-                                let distance = abs(index - activeIndex)
-                                let nextTime = (index + 1 < player.lyrics.count) ? player.lyrics[index + 1].time : (line.time + 4.5)
-                                let lineDuration = max(0.5, nextTime - line.time)
-                                let elapsedInLine = max(0, player.elapsed - player.lyricsOffset - line.time)
+                                let activeLeadIndex = player.activeLyricIndex ?? -1
+                                let currentPos = max(0, player.elapsed - player.lyricsOffset)
+
+                                let lineStartTime = line.time
+                                let nextLeadLine = player.lyrics[(index + 1)...].first(where: { !$0.isBackground })
+                                let defaultEndTime = nextLeadLine?.time ?? (lineStartTime + 4.5)
+                                let lineEndTime = max(lineStartTime + 0.5, line.endTime ?? defaultEndTime)
+                                let lineDuration = max(0.5, lineEndTime - lineStartTime)
+
+                                let isActive: Bool
+                                let isSung: Bool
+
+                                if line.isBackground {
+                                    // Backing vocal: active while singing in parallel with the main phrase
+                                    isActive = (currentPos >= lineStartTime && currentPos < lineEndTime)
+                                    isSung = (currentPos >= lineEndTime)
+                                } else {
+                                    // Lead vocal: active throughout its phrase window, including when backs sing
+                                    if index == activeLeadIndex {
+                                        isActive = (currentPos >= lineStartTime && currentPos < lineEndTime)
+                                        isSung = (currentPos >= lineEndTime)
+                                    } else if index < activeLeadIndex {
+                                        isActive = false
+                                        isSung = true
+                                    } else {
+                                        isActive = (currentPos >= lineStartTime && currentPos < lineEndTime)
+                                        isSung = false
+                                    }
+                                }
+
+                                let distance = isActive ? 0 : abs(index - activeLeadIndex)
+                                let elapsedInLine = max(0, currentPos - lineStartTime)
                                 let progress = max(0, min(1.0, elapsedInLine / lineDuration))
                                 let isDot = (line.text == "•••" || line.text == "..." || line.text == "♪")
 
@@ -646,7 +671,7 @@ private struct SpicyLyricLine: View {
                 lineSweepView
             }
         }
-        .scaleEffect(isInstrumental ? 1.0 : textScale, anchor: .leading)
+        .scaleEffect(isInstrumental ? 1.0 : (line.isBackground ? (isActive ? 1.01 : 0.98) : textScale), anchor: .leading)
         .blur(radius: isInstrumental ? 0.0 : distanceBlur)
         .padding(.horizontal, 12)
         .padding(.vertical, isInstrumental ? 4 : (line.isBackground ? 2 : 8))
