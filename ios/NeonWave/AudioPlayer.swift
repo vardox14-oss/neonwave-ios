@@ -499,18 +499,7 @@ private final class SilentAudioKeepAlive {
 
     private func startNativeOnlinePlayback(videoId: String, trackID: String) {
         resolveTask?.cancel()
-        isYouTubeActive = false
-        isPlaying = false
-        isBuffering = true
-        resolveTask = Task { [weak self] in
-            let nativeURL = await MusicCatalogService.nativeStreamURL(videoId: videoId)
-            guard !Task.isCancelled, let self, self.current?.id == trackID else { return }
-            if let nativeURL {
-                self.startAVPlayerFallback(url: nativeURL, fallbackVideoId: videoId)
-            } else {
-                self.startYouTubePlayback(videoId: videoId)
-            }
-        }
+        startYouTubePlayback(videoId: videoId)
     }
 
     private func startYouTubePlayback(videoId: String) {
@@ -527,8 +516,26 @@ private final class SilentAudioKeepAlive {
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 guard let self, self.isYouTubeActive, self.isBuffering, !self.isPlaying, let cur = self.current else { return }
-                if let stream = cur.streamURL, let url = URL(string: stream) {
-                    self.startAVPlayerFallback(url: url)
+                Task {
+                    if let altVid = await MusicCatalogService.resolveAlternativeYouTubeId(title: cur.title, artist: cur.artist, excludeVideoId: videoId) {
+                        await MainActor.run {
+                            guard self.current?.id == cur.id, self.isYouTubeActive, !self.isPlaying else { return }
+                            if self.queue.indices.contains(self.index) {
+                                self.queue[self.index].videoId = altVid
+                                self.current = self.queue[self.index]
+                            }
+                            self.startYouTubePlayback(videoId: altVid)
+                        }
+                    } else if let stream = cur.streamURL, let url = URL(string: stream) {
+                        await MainActor.run {
+                            self.startAVPlayerFallback(url: url)
+                        }
+                    } else {
+                        await MainActor.run {
+                            self.error = "Erreur de lecture du titre."
+                            self.isBuffering = false
+                        }
+                    }
                 }
             }
         }

@@ -16,12 +16,6 @@ struct MainView: View {
 
     var body: some View {
         ZStack {
-            YouTubePlayerWebView()
-                .frame(width: 320, height: 240)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-                .zIndex(-100)
-
             PremiumBackdrop(accent: tab == .downloads ? NW.cyan : NW.violet)
 
             NavigationStack {
@@ -125,6 +119,13 @@ struct MainView: View {
             .fullScreenCover(isPresented: $showPlayer) { PlayerView(onClose: { showPlayer = false }) }
             .sheet(isPresented: $showSettings) { SettingsView() }
             .sheet(item: $artistRouter.selectedArtist) { artist in ArtistDetailView(artist: artist) }
+
+            YouTubePlayerWebView()
+                .frame(width: 200, height: 200)
+                .opacity(0.01)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+                .zIndex(999)
         }
     }
 }

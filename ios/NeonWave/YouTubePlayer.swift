@@ -40,7 +40,11 @@ final class YouTubePlayer: NSObject, ObservableObject, WKScriptMessageHandler, W
         controller.add(self, name: "neonwaveBridge")
         config.userContentController = controller
 
-        let wv = WKWebView(frame: .init(x: 0, y: 0, width: 320, height: 240), configuration: config)
+        let wv = WKWebView(frame: .init(x: 0, y: 0, width: 200, height: 200), configuration: config)
+        wv.isOpaque = false
+        wv.backgroundColor = .clear
+        wv.scrollView.backgroundColor = .clear
+        wv.scrollView.isScrollEnabled = false
         wv.navigationDelegate = self
         self.backingWebView = wv
         loadHTML()
@@ -54,8 +58,8 @@ final class YouTubePlayer: NSObject, ObservableObject, WKScriptMessageHandler, W
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
         <script src="https://www.youtube.com/iframe_api"></script>
         <style>
-        * { margin:0; padding:0; background:#000; overflow:hidden; }
-        html, body, #player { width:100%; height:100%; }
+        * { margin:0; padding:0; background:transparent; overflow:hidden; }
+        html, body, #player { width:100%; height:100%; background:transparent; }
         </style>
         </head>
         <body>
@@ -127,15 +131,16 @@ final class YouTubePlayer: NSObject, ObservableObject, WKScriptMessageHandler, W
         function playVideoId(id) {
             lastPlayRequestTime = Date.now();
             userRequestedPause = false;
-            if (player && typeof player.loadVideoById === 'function') {
+            if (player) {
                 try {
                     if (player.unMute) player.unMute();
                     if (player.setVolume) player.setVolume(100);
-                    player.loadVideoById({
-                        videoId: id,
-                        startSeconds: 0
-                    });
-                    player.playVideo();
+                    if (typeof player.loadVideoById === 'function') {
+                        player.loadVideoById(id, 0);
+                    } else if (typeof player.cueVideoById === 'function') {
+                        player.cueVideoById(id, 0);
+                    }
+                    if (player.playVideo) player.playVideo();
                 } catch(e) {}
                 setTimeout(function() {
                     try {
