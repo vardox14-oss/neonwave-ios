@@ -776,52 +776,112 @@ private struct SpicyLyricLine: View {
     }
 
     // ─── MODE 2 : BALAYAGE PROGRESSIF CONTINU SANS BOÎTE (Line Mode) ─────────
-    @ViewBuilder
     private var lineSweepView: some View {
-        let fontSize: CGFloat = line.isBackground ? 19.5 : 26
-        let fontWeight: Font.Weight = line.isBackground ? .semibold : .bold
-        if !isActive {
-            Text(line.text)
-                .font(.system(size: fontSize, weight: fontWeight, design: .rounded))
-                .tracking(-0.35)
-                .lineSpacing(6)
-                .multilineTextAlignment(.leading)
-                .foregroundStyle(Color.white.opacity(line.isBackground ? textOpacity * 0.75 : textOpacity))
-        } else {
-            let targetPos = -0.20 + 1.20 * progress
-            let glowIntensity = sin(progress * .pi)
+        SmoothLineSweep(
+            text: line.text,
+            progress: progress,
+            duration: duration,
+            isActive: isActive,
+            isPlaying: isPlaying,
+            isBackground: line.isBackground,
+            textOpacity: textOpacity
+        )
+    }
+}
 
-            Text(line.text)
+private struct SmoothLineSweep: View {
+    let text: String
+    let progress: Double
+    let duration: Double
+    let isActive: Bool
+    let isPlaying: Bool
+    let isBackground: Bool
+    let textOpacity: Double
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    @State private var anchorProgress: Double = 0
+    @State private var anchorDate: Date = Date()
+    @State private var displayedProgress: Double = 0
+
+    var body: some View {
+        let fontSize: CGFloat = isBackground ? 19.5 : 26
+        let fontWeight: Font.Weight = isBackground ? .semibold : .bold
+
+        if !isActive {
+            Text(text)
                 .font(.system(size: fontSize, weight: fontWeight, design: .rounded))
                 .tracking(-0.35)
                 .lineSpacing(6)
                 .multilineTextAlignment(.leading)
-                .foregroundColor(.clear)
-                .overlay(
-                    GeometryReader { geo in
-                        LinearGradient(
-                            stops: [
-                                .init(color: .white, location: 0),
-                                .init(color: .white, location: max(0, targetPos)),
-                                .init(color: .white.opacity(0.38), location: min(1.0, targetPos + 0.20)),
-                                .init(color: .white.opacity(0.38), location: 1.0)
-                            ],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                        .mask(
-                            Text(line.text)
-                                .font(.system(size: fontSize, weight: fontWeight, design: .rounded))
-                                .tracking(-0.35)
-                                .lineSpacing(6)
-                                .multilineTextAlignment(.leading)
-                                .frame(width: geo.size.width, alignment: .leading)
-                        )
+                .foregroundStyle(Color.white.opacity(isBackground ? textOpacity * 0.75 : textOpacity))
+        } else {
+            TimelineView(.animation(paused: !isPlaying || reduceMotion)) { timeline in
+                let targetPos = -0.20 + 1.20 * displayedProgress
+                let glowIntensity = sin(displayedProgress * .pi)
+
+                Text(text)
+                    .font(.system(size: fontSize, weight: fontWeight, design: .rounded))
+                    .tracking(-0.35)
+                    .lineSpacing(6)
+                    .multilineTextAlignment(.leading)
+                    .foregroundColor(.clear)
+                    .overlay(
+                        GeometryReader { geo in
+                            LinearGradient(
+                                stops: [
+                                    .init(color: .white, location: 0),
+                                    .init(color: .white, location: max(0, targetPos)),
+                                    .init(color: .white.opacity(0.38), location: min(1.0, targetPos + 0.20)),
+                                    .init(color: .white.opacity(0.38), location: 1.0)
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                            .mask(
+                                Text(text)
+                                    .font(.system(size: fontSize, weight: fontWeight, design: .rounded))
+                                    .tracking(-0.35)
+                                    .lineSpacing(6)
+                                    .multilineTextAlignment(.leading)
+                                    .frame(width: geo.size.width, alignment: .leading)
+                            )
+                        }
+                    )
+                    .shadow(color: Color.white.opacity((isBackground ? 0.35 : 0.55) * glowIntensity), radius: 10, x: 0, y: 0)
+                    .shadow(color: Color.white.opacity((isBackground ? 0.18 : 0.28) * glowIntensity), radius: 24, x: 0, y: 0)
+                    .onChange(of: timeline.date) { _, date in
+                        advance(to: date)
                     }
-                )
-                .shadow(color: Color.white.opacity((line.isBackground ? 0.35 : 0.55) * glowIntensity), radius: 10, x: 0, y: 0)
-                .shadow(color: Color.white.opacity((line.isBackground ? 0.18 : 0.28) * glowIntensity), radius: 24, x: 0, y: 0)
+            }
+            .onAppear {
+                anchorProgress = progress
+                anchorDate = Date()
+                displayedProgress = progress
+            }
+            .onChange(of: progress) { old, new in
+                let jump = abs(new - old) * duration
+                if jump > 0.4 || new < old {
+                    anchorProgress = new
+                    anchorDate = Date()
+                    displayedProgress = new
+                } else {
+                    anchorProgress = new
+                    anchorDate = Date()
+                }
+            }
+            .onChange(of: isPlaying) { _, _ in
+                anchorProgress = progress
+                anchorDate = Date()
+            }
         }
+    }
+
+    private func advance(to date: Date) {
+        guard isPlaying, duration > 0 else { return }
+        let extra = max(0, date.timeIntervalSince(anchorDate))
+        let currentElapsed = anchorProgress * duration + extra
+        let p = max(0, min(1.0, currentElapsed / duration))
+        displayedProgress = p
     }
 }
 
