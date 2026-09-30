@@ -65,8 +65,11 @@ struct LoopingCanvasVideo: UIViewRepresentable {
             player?.pause()
             let queue = AVQueuePlayer()
             queue.isMuted = true
+            queue.allowsExternalPlayback = false  // no AirPlay overhead
             queue.actionAtItemEnd = .advance
             let item = AVPlayerItem(url: url)
+            // Cap decode at 720p — canvas is never shown at full native resolution
+            item.preferredMaximumResolution = CGSize(width: 1280, height: 720)
             looper = AVPlayerLooper(player: queue, templateItem: item)
             player = queue
             loadedURL = url
@@ -86,6 +89,7 @@ struct LoopingCanvasVideo: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: LoopingCanvasUIView, context: Context) {
+        // Only reload if URL changed — avoids AVPlayerLooper reallocation on every SwiftUI pass
         context.coordinator.load(url, in: uiView)
         if isPlaying { context.coordinator.player?.play() }
         else { context.coordinator.player?.pause() }

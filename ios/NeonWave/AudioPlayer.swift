@@ -109,7 +109,7 @@ private final class SilentAudioKeepAlive {
     private var musicKitCompletedTrackID: String?
 
     init() {
-        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.05, preferredTimescale: 600), queue: .main) { [weak self] time in
+        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.25, preferredTimescale: 600), queue: .main) { [weak self] time in
             Task { @MainActor in
                 guard let self, !self.isYouTubeActive else { return }
                 self.elapsed = time.seconds.isFinite ? time.seconds : 0
@@ -175,8 +175,9 @@ private final class SilentAudioKeepAlive {
         setupYouTubeCallbacks()
 #endif
 
-        musicKitTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refreshAppleMusicState() }
+        musicKitTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            guard let self, self.isAppleMusicActive else { return }
+            Task { @MainActor in self.refreshAppleMusicState() }
         }
 
         let commands = MPRemoteCommandCenter.shared()
@@ -751,7 +752,13 @@ private final class SilentAudioKeepAlive {
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
+    private var lastNowPlayingUpdate: Date = .distantPast
+
     private func updateNowPlaying(includeArtwork: Bool = false) {
+        // Throttle to 1Hz max — MPNowPlayingInfoCenter IPC is expensive
+        let now = Date()
+        guard includeArtwork || now.timeIntervalSince(lastNowPlayingUpdate) >= 1.0 else { return }
+        lastNowPlayingUpdate = now
         guard !isAppleMusicActive else { return }
         guard let current else {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nil

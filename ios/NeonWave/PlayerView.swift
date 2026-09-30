@@ -29,8 +29,11 @@ struct MiniPlayer: View {
                     else { IconButton(symbol: player.isPlaying ? "pause.fill" : "play.fill", label: player.isPlaying ? "Pause" : "Lecture") { player.toggle() } }
                     IconButton(symbol: "forward.end.fill", label: "Titre suivant") { player.next() }
                 }.padding(.horizontal, 10).padding(.vertical, 8)
-                GeometryReader { geo in Rectangle().fill(NW.blue.gradient).frame(width: geo.size.width * min(1, max(0, player.duration > 0 ? player.elapsed / player.duration : 0))) }
-                    .frame(height: 2).background(.white.opacity(0.08))
+                Rectangle()
+                    .fill(NW.blue.gradient)
+                    .scaleEffect(x: player.duration > 0 ? min(1, max(0, player.elapsed / player.duration)) : 0, y: 1.0, anchor: .leading)
+                    .frame(height: 2)
+                    .background(.white.opacity(0.08))
             }.background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous)).clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
     }
@@ -51,6 +54,7 @@ struct PlayerView: View {
     @State private var canvasURL: URL? = nil
     @State private var selectedArtist: ArtistIdentifier? = nil
     @State private var showArtworkOverlay = false
+    @State private var localArtImage: UIImage? = nil
 
     var body: some View {
         GeometryReader { geo in
@@ -147,7 +151,13 @@ struct PlayerView: View {
             guard let track = player.current else {
                 canvasURL = nil
                 showArtworkOverlay = false
+                localArtImage = nil
                 return
+            }
+            if let local = library.artworkURL(track) {
+                localArtImage = UIImage(contentsOfFile: local.path)
+            } else {
+                localArtImage = nil
             }
             if let localCanvas = library.canvasURL(track) {
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.5)) {
@@ -173,7 +183,7 @@ struct PlayerView: View {
 
                 // 1. Fond vibrant basé sur la pochette (toujours présent en arrière-plan)
                 Group {
-                    if let localArt = library.artworkURL(track), let image = UIImage(contentsOfFile: localArt.path) {
+                    if let image = localArtImage {
                         Image(uiImage: image)
                             .resizable()
                             .scaledToFill()
@@ -207,9 +217,9 @@ struct PlayerView: View {
                 RadialGradient(colors: [NW.colors[track.colorIndex][0].opacity(0.35), .clear], center: .topTrailing, startRadius: 40, endRadius: 460)
                 LinearGradient(colors: [.black.opacity(0.15), .black.opacity(0.40), NW.background.opacity(0.85)], startPoint: .top, endPoint: .bottom)
 
-                // 2. Vidéo Canvas par-dessus quand elle est prête
+                // 2. Vidéo Canvas par-dessus quand elle est prête (mise en pause en mode Paroles pour économiser le GPU)
                 if let canvasURL = canvasURL {
-                    LoopingCanvasVideo(url: canvasURL, isPlaying: player.isPlaying)
+                    LoopingCanvasVideo(url: canvasURL, isPlaying: player.isPlaying && mode == .cover)
                         .frame(width: size.width, height: size.height)
                         .clipped()
                         .transition(.opacity.animation(.easeInOut(duration: 0.6)))
@@ -604,13 +614,15 @@ struct LyricsView: View {
 
     private func lineState(for index: Int, line: LyricLine, currentPos: Double, activeLeadIndex: Int) -> LyricLineState {
         let lineStartTime = line.time
-        let defaultEndTime: Double
-        if index + 1 < player.lyrics.count {
-            defaultEndTime = player.lyrics[(index + 1)...].first(where: { !$0.isBackground })?.time ?? (lineStartTime + 4.5)
+        let lineEndTime: Double
+        if let existing = line.endTime {
+            lineEndTime = max(lineStartTime + 0.5, existing)
+        } else if index + 1 < player.lyrics.count {
+            let nextTime = player.lyrics[(index + 1)...].first(where: { !$0.isBackground })?.time ?? (lineStartTime + 4.5)
+            lineEndTime = max(lineStartTime + 0.5, nextTime)
         } else {
-            defaultEndTime = lineStartTime + 4.5
+            lineEndTime = lineStartTime + 4.5
         }
-        let lineEndTime = max(lineStartTime + 0.5, line.endTime ?? defaultEndTime)
         let lineDuration = max(0.5, lineEndTime - lineStartTime)
 
         let isActive: Bool
@@ -653,6 +665,22 @@ private struct LyricLineState {
     let distance: Int
 }
 
+// Lightweight static word for lines that are not currently active.
+// Avoids spinning up 60fps TimelineView + Spring physics for inactive lines across the song.
+private struct StaticLyricWord: View {
+    let text: String
+    let isBackground: Bool
+
+    var body: some View {
+        let fontSize: CGFloat = isBackground ? 19.5 : 26
+        let fontWeight: Font.Weight = isBackground ? .semibold : .bold
+        Text(text)
+            .font(.system(size: fontSize, weight: fontWeight, design: .rounded))
+            .tracking(-0.35)
+            .foregroundStyle(Color.white)
+    }
+}
+
 // ─── LIGNE DE PAROLE EXACT SPICY LYRICS 6.1.1 ──────────────────────────────
 private struct SpicyLyricLine: View {
     let line: LyricLine
@@ -683,11 +711,28 @@ private struct SpicyLyricLine: View {
 
     private var distanceBlur: CGFloat {
         if isActive { return 0.0 }
-        return CGFloat(min(Double(distance) * (isWaveEffect ? 1.25 : 2.2), 10.0)) // Spicy Lyrics BlurMultiplier
+        return CGFloat(min(Double(distance) * (isWaveEffect ? 1.25 : 2.2), 7.0)) // Clamped to 7.0 max to save GPU shader samples
     }
 
     var body: some View {
-        Group {
+        blurredContent
+            .padding(.horizontal, 12)
+            .padding(.vertical, isInstrumental ? 4 : (line.isBackground ? 2 : 8))
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(isActive && !isInstrumental && !isWaveEffect ? Color.white.opacity(0.08) : Color.clear)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(isActive && !isInstrumental && !isWaveEffect ? Color.white.opacity(0.12) : Color.clear, lineWidth: 1)
+                    )
+            )
+            .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.64), value: isActive)
+            .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private var blurredContent: some View {
+        let content = Group {
             if isInstrumental {
                 SpicyInstrumentalDots(progress: progress, isActive: isActive)
             } else if isWaveEffect {
@@ -697,19 +742,12 @@ private struct SpicyLyricLine: View {
             }
         }
         .scaleEffect(isInstrumental ? 1.0 : (line.isBackground ? (isActive ? 1.01 : 0.98) : textScale), anchor: .leading)
-        .blur(radius: isInstrumental ? 0.0 : distanceBlur)
-        .padding(.horizontal, 12)
-        .padding(.vertical, isInstrumental ? 4 : (line.isBackground ? 2 : 8))
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(isActive && !isInstrumental && !isWaveEffect ? Color.white.opacity(0.08) : Color.clear)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(isActive && !isInstrumental && !isWaveEffect ? Color.white.opacity(0.12) : Color.clear, lineWidth: 1)
-                )
-        )
-        .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.64), value: isActive)
-        .contentShape(Rectangle())
+
+        if !isInstrumental && distanceBlur > 0.1 {
+            content.blur(radius: distanceBlur)
+        } else {
+            content
+        }
     }
 
     // Spicy Lyrics word curves, with estimated timing when only line timestamps exist.
@@ -719,14 +757,17 @@ private struct SpicyLyricLine: View {
         return FlowLayout(spacing: line.isBackground ? 5 : 7, lineSpacing: line.isBackground ? 4 : 7) {
             ForEach(words.indices, id: \.self) { index in
                 let word = words[index]
-                let wordDuration = max(0.001, (word.end ?? (line.time + duration)) - word.start)
-                let wordProgress = isActive
-                    ? (line.time + progress * duration - word.start) / wordDuration
-                    : (isSung ? 1.0 : 0.0)
-                SpicyWaveWord(text: word.text, progress: wordProgress,
-                              duration: wordDuration,
-                              isActive: isActive, isPlaying: isPlaying,
-                              isBackground: word.isBackground || line.isBackground)
+                if isActive {
+                    let wordDuration = max(0.001, (word.end ?? (line.time + duration)) - word.start)
+                    let wordProgress = (line.time + progress * duration - word.start) / wordDuration
+                    SpicyWaveWord(text: word.text, progress: wordProgress,
+                                  duration: wordDuration,
+                                  isActive: true, isPlaying: isPlaying,
+                                  isBackground: word.isBackground || line.isBackground)
+                } else {
+                    StaticLyricWord(text: word.text,
+                                    isBackground: word.isBackground || line.isBackground)
+                }
             }
         }
         .opacity(textOpacity)
