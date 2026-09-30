@@ -277,54 +277,57 @@ enum MusicCatalogService {
     private static func deviceAudioURL(videoId: String) async -> URL? {
         guard videoId.range(of: "^[A-Za-z0-9_-]{11}$", options: .regularExpression) != nil else { return nil }
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 10
+        configuration.timeoutIntervalForRequest = 12
         configuration.timeoutIntervalForResource = 20
         let session = URLSession(configuration: configuration)
         defer { session.finishTasksAndInvalidate() }
-        let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
-        do {
-            var watch = URLRequest(url: URL(string: "https://www.youtube.com/watch?v=\(videoId)")!)
-            watch.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-            watch.setValue("en-us,en;q=0.5", forHTTPHeaderField: "Accept-Language")
-            watch.setValue("SOCS=CAI", forHTTPHeaderField: "Cookie")
-            let (watchData, watchResponse) = try await session.data(for: watch)
-            guard !Task.isCancelled, (watchResponse as? HTTPURLResponse)?.statusCode == 200,
-                  let html = String(data: watchData, encoding: .utf8) else { return nil }
-            var request = URLRequest(url: URL(string: "https://www.youtube.com/youtubei/v1/player?prettyPrint=false")!)
-            request.httpMethod = "POST"
-            request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.setValue("101", forHTTPHeaderField: "X-Youtube-Client-Name")
-            request.setValue("1.02", forHTTPHeaderField: "X-Youtube-Client-Version")
-            request.setValue("https://www.youtube.com", forHTTPHeaderField: "Origin")
-            let visitorPattern = try NSRegularExpression(pattern: #""VISITOR_DATA"\s*:\s*"([^"]+)""#)
-            if let match = visitorPattern.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
-               let range = Range(match.range(at: 1), in: html) {
-                request.setValue(String(html[range]), forHTTPHeaderField: "X-Goog-Visitor-Id")
-            }
-            let client: [String: Any] = [
-                "clientName": "VISIONOS", "clientVersion": "1.02",
-                "deviceMake": "Apple", "deviceModel": "RealityDevice17,1",
-                "userAgent": userAgent, "osName": "visionOS", "osVersion": "26.5.23O471",
+
+        // Client configs to try in order — iOS is most reliable (privileged, no PO token needed)
+        let clients: [[String: Any]] = [
+            // iOS native client — signed URLs, no PO token required
+            [
+                "clientName": "IOS", "clientVersion": "20.03.02",
+                "deviceMake": "Apple", "deviceModel": "iPhone16,2",
+                "userAgent": "com.google.ios.youtube/20.03.02 (iPhone; CPU iPhone OS 18_3_2 like Mac OS X)",
+                "osName": "iPhone", "osVersion": "18.3.2.22D82",
+                "hl": "en", "timeZone": "UTC", "utcOffsetMinutes": 0
+            ],
+            // TV embedded — still works without login for most videos
+            [
+                "clientName": "TVHTML5_SIMPLY_EMBEDDED_PLAYER", "clientVersion": "2.0",
                 "hl": "en", "timeZone": "UTC", "utcOffsetMinutes": 0
             ]
-            request.httpBody = try JSONSerialization.data(withJSONObject: [
-                "context": ["client": client], "videoId": videoId,
-                "contentCheckOk": true, "racyCheckOk": true
-            ])
-            let (data, response) = try await session.data(for: request)
-            guard !Task.isCancelled, (response as? HTTPURLResponse)?.statusCode == 200,
-                  let url = selectDeviceAudioURL(data, videoId: videoId) else { return nil }
-            // Check the actual audio before handing the URL to AVPlayer/downloads.
-            // Use a fresh request without the YouTube guest session, like AVPlayer.
-            var probe = URLRequest(url: url)
-            probe.setValue("bytes=0-1023", forHTTPHeaderField: "Range")
-            let (bytes, probeResponse) = try await URLSession.shared.data(for: probe)
-            guard !Task.isCancelled, let http = probeResponse as? HTTPURLResponse,
-                  http.statusCode == 206, bytes.count == 1024,
-                  http.mimeType?.hasPrefix("audio/") == true else { return nil }
-            return url
-        } catch { return nil }
+        ]
+        let clientNames = [5, 85] // matching InnerTube clientName IDs
+
+        for (idx, client) in clients.enumerated() {
+            guard !Task.isCancelled else { return nil }
+            do {
+                let uaHeader = (client["userAgent"] as? String) ?? "com.google.ios.youtube/20.03.02 (iPhone; CPU iPhone OS 18_3_2 like Mac OS X)"
+                var request = URLRequest(url: URL(string: "https://www.youtube.com/youtubei/v1/player?prettyPrint=false")!)
+                request.httpMethod = "POST"
+                request.setValue(uaHeader, forHTTPHeaderField: "User-Agent")
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.setValue(String(clientNames[idx]), forHTTPHeaderField: "X-Youtube-Client-Name")
+                request.setValue(client["clientVersion"] as? String ?? "20.03.02", forHTTPHeaderField: "X-Youtube-Client-Version")
+                request.setValue("https://www.youtube.com", forHTTPHeaderField: "Origin")
+                request.httpBody = try JSONSerialization.data(withJSONObject: [
+                    "context": ["client": client], "videoId": videoId,
+                    "contentCheckOk": true, "racyCheckOk": true
+                ])
+                let (data, response) = try await session.data(for: request)
+                guard !Task.isCancelled, (response as? HTTPURLResponse)?.statusCode == 200,
+                      let url = selectDeviceAudioURL(data, videoId: videoId) else { continue }
+                // Quick probe to confirm URL is actually accessible from this device
+                var probe = URLRequest(url: url)
+                probe.setValue("bytes=0-1023", forHTTPHeaderField: "Range")
+                let (bytes, probeResponse) = try await URLSession.shared.data(for: probe)
+                guard !Task.isCancelled, let http = probeResponse as? HTTPURLResponse,
+                      http.statusCode == 206, bytes.count > 0 else { continue }
+                return url
+            } catch { continue }
+        }
+        return nil
     }
 
     static func resolveTrackMedia(title: String, artist: String, duration: Double = 0, spotifyId: String? = nil) async -> ResolvedMedia? {
