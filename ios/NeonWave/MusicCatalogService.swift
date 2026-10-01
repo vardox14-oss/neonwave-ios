@@ -233,7 +233,17 @@ enum MusicCatalogService {
         return []
     }
 
-    private static var ytCache: [String: String] = [:]
+    private static let ytCacheKey = "neonwave_yt_cache"
+    private static var ytCache: [String: String] = {
+        if let saved = UserDefaults.standard.dictionary(forKey: ytCacheKey) as? [String: String] {
+            return saved
+        }
+        return [:]
+    }()
+
+    private static func saveYtCache() {
+        UserDefaults.standard.set(ytCache, forKey: ytCacheKey)
+    }
 
     struct YouTubeCandidate: Equatable {
         let videoId: String
@@ -340,6 +350,21 @@ enum MusicCatalogService {
     static func resolveTrackMedia(title: String, artist: String, duration: Double = 0, spotifyId: String? = nil) async -> ResolvedMedia? {
         let key = "\(artist.lowercased())|\(title.lowercased())"
 
+        // 1. Instant cache fast-path: if YouTube video ID was previously resolved, skip metadata search and directly obtain stream URL
+        if let cachedVid = ytCache[key], !cachedVid.isEmpty {
+            if let streamURL = await serverStreamURL(videoId: cachedVid) {
+                return ResolvedMedia(
+                    videoId: cachedVid,
+                    duration: duration > 0 ? duration : nil,
+                    title: title,
+                    artist: artist,
+                    spotifyId: spotifyId,
+                    thumbnail: nil,
+                    streamURL: streamURL
+                )
+            }
+        }
+
         if AppConfiguration.apiURL != nil {
             let path = (spotifyId != nil && spotifyId!.count == 22) ? "api/music/resolve/\(spotifyId!)" : "api/music/resolve-by-metadata"
             let query = [
@@ -349,6 +374,7 @@ enum MusicCatalogService {
             ]
             if let resolved: ResolveResponse = try? await APIClient().call(path, authenticated: false, queryItems: query), !resolved.videoId.isEmpty {
                 ytCache[key] = resolved.videoId
+                saveYtCache()
                 let sURL: URL? = {
                     if let streamPath = resolved.streamPath, let baseURL = AppConfiguration.apiURL {
                         return URL(string: streamPath, relativeTo: baseURL)?.absoluteURL
@@ -394,6 +420,7 @@ enum MusicCatalogService {
             ]
             if let resolved: ResolveResponse = try? await APIClient().call(path, authenticated: false, queryItems: query), !resolved.videoId.isEmpty {
                 ytCache[key] = resolved.videoId
+                saveYtCache()
                 return resolved.videoId
             }
         }
@@ -422,6 +449,7 @@ enum MusicCatalogService {
             let candidates = parseYouTubeCandidates(html)
             if let best = bestYouTubeCandidate(candidates, title: title, artist: artist, duration: duration) {
                 ytCache[key] = best.videoId
+                saveYtCache()
                 return best.videoId
             }
 
@@ -431,6 +459,7 @@ enum MusicCatalogService {
                match.numberOfRanges > 1 {
                 let vid = ns.substring(with: match.range(at: 1))
                 ytCache[key] = vid
+                saveYtCache()
                 return vid
             }
 
@@ -440,6 +469,7 @@ enum MusicCatalogService {
                match.numberOfRanges > 1 {
                 let vid = ns.substring(with: match.range(at: 1))
                 ytCache[key] = vid
+                saveYtCache()
                 return vid
             }
         } catch { }

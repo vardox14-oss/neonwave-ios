@@ -130,6 +130,7 @@ enum CrossfadeMath {
     private var isAppleMusicActive = false
     private var isYouTubeActive = false
     private var resolveTask: Task<Void, Never>?
+    private var preloadTask: Task<Void, Never>?
     private var timeObservers: [Any] = []
     private var statusObserver: NSKeyValueObservation?
     private var playbackObservers: [NSKeyValueObservation] = []
@@ -296,8 +297,9 @@ enum CrossfadeMath {
         guard let nextIndex = CrossfadeMath.upcomingIndex(current: index, count: queue.count, shuffle: shuffle, repeatMode: repeatMode) else { return }
         plannedIndex = nextIndex
         plannedTrackID = queue[nextIndex].id
-        // Streams and Apple Music can't be faded: keep the plan (so shuffle doesn't re-roll every tick) without loading anything.
-        guard let url = library?.localURL(queue[nextIndex]) else { return }
+        // Local tracks and preloaded online streams can be buffered in standbyPlayer
+        let plannedURL = library?.localURL(queue[nextIndex]) ?? (queue[nextIndex].streamURL.flatMap { URL(string: $0) })
+        guard let url = plannedURL else { return }
         standbyPlayer.volume = 0
         standbyPlayer.automaticallyWaitsToMinimizeStalling = false
         standbyPlayer.replaceCurrentItem(with: AVPlayerItem(url: url))
@@ -517,6 +519,7 @@ enum CrossfadeMath {
     }
 
     func play(_ track: Track, in tracks: [Track]? = nil) {
+        preloadTask?.cancel()
         if current?.id == track.id {
             if isPlaying { pause() } else { resume() }
             return
@@ -577,6 +580,17 @@ enum CrossfadeMath {
         }
 
         // 2. Online track: resolve the complete song, then play it natively.
+        // Fast-path: if streamURL is already known on this track (e.g. from background queue preloading), start AVPlayer immediately!
+        if let stream = target.streamURL, let url = URL(string: stream) {
+            isAppleMusicActive = false
+            isYouTubeActive = false
+            SilentAudioKeepAlive.shared.stop()
+            fetchLyricsForCurrent(preferredDuration: target.duration)
+            startAVPlayerPlayback(url: url, fallbackVideoId: target.videoId)
+            preloadUpcomingTrack()
+            return
+        }
+
         // Native AVPlayer keeps playing with the screen locked and exposes the
         // real iOS lock-screen controls.
         isYouTubeActive = false
@@ -620,6 +634,7 @@ enum CrossfadeMath {
                         self.updateNowPlaying(includeArtwork: true)
                         if let streamURL = media.streamURL {
                             self.startAVPlayerPlayback(url: streamURL, fallbackVideoId: media.videoId)
+                            self.preloadUpcomingTrack()
                         } else {
                             self.startNativeOnlinePlayback(videoId: media.videoId, trackID: target.id)
                         }
@@ -627,6 +642,7 @@ enum CrossfadeMath {
                         self.startNativeOnlinePlayback(videoId: existingVid, trackID: target.id)
                     } else if let stream = target.streamURL, let url = URL(string: stream) {
                         self.startAVPlayerPlayback(url: url)
+                        self.preloadUpcomingTrack()
                     } else {
                         self.error = "Impossible de charger ce titre."
                         self.pause()
@@ -805,6 +821,7 @@ enum CrossfadeMath {
                         }
                         self.updateNowPlaying()
                     }
+                    self.preloadUpcomingTrack()
                 }
             }
         }
@@ -848,6 +865,42 @@ enum CrossfadeMath {
                 self.plainLyrics = result.plain
                 self.loadingLyrics = false
                 self.updateActiveLyric()
+            }
+        }
+    }
+
+    private func preloadUpcomingTrack() {
+        preloadTask?.cancel()
+        guard let nextIndex = CrossfadeMath.upcomingIndex(current: index, count: queue.count, shuffle: shuffle, repeatMode: repeatMode),
+              queue.indices.contains(nextIndex) else { return }
+        let nextTrack = queue[nextIndex]
+        if nextTrack.appleMusicID != nil || library?.localURL(nextTrack) != nil { return }
+        if nextTrack.streamURL != nil { return }
+
+        preloadTask = Task.detached(priority: .utility) { [weak self] in
+            // Pause 2 seconds so the current song's initial playback is completely smooth
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+
+            let media = await MusicCatalogService.resolveTrackMedia(
+                title: nextTrack.title,
+                artist: nextTrack.artist,
+                duration: nextTrack.duration,
+                spotifyId: nextTrack.spotifyId
+            )
+            guard !Task.isCancelled, let media else { return }
+
+            await MainActor.run { [weak self] in
+                guard let self, self.queue.indices.contains(nextIndex), self.queue[nextIndex].id == nextTrack.id else { return }
+                self.queue[nextIndex].videoId = media.videoId
+                if let dur = media.duration, dur > 0 { self.queue[nextIndex].duration = dur }
+                if let spId = media.spotifyId, !spId.isEmpty { self.queue[nextIndex].spotifyId = spId }
+                if let thumb = media.thumbnail, !thumb.isEmpty, (self.queue[nextIndex].artworkURL == nil || self.queue[nextIndex].artworkURL?.isEmpty == true) {
+                    self.queue[nextIndex].artworkURL = thumb
+                }
+                if let stream = media.streamURL {
+                    self.queue[nextIndex].streamURL = stream.absoluteString
+                }
             }
         }
     }
@@ -978,6 +1031,7 @@ enum CrossfadeMath {
     }
 
     func stop() {
+        preloadTask?.cancel()
         resolveTask?.cancel()
         lyricsTask?.cancel()
         lyricsFallbackTask?.cancel()
