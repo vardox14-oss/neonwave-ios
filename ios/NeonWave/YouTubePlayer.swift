@@ -65,52 +65,60 @@ final class YouTubePlayer: NSObject, ObservableObject, WKScriptMessageHandler, W
         <body>
         <div id="player"></div>
         <script>
-        var player;
-        var progressTimer;
+        var player = null;
+        var pendingId = null;
+        var isApiReady = false;
+        var progressTimer = null;
         var lastPlayRequestTime = 0;
         var userRequestedPause = false;
+
         function onYouTubeIframeAPIReady() {
-            player = new YT.Player('player', {
-                width: '100%',
-                height: '100%',
-                playerVars: {
-                    'playsinline': 1,
-                    'autoplay': 1,
-                    'controls': 0,
-                    'disablekb': 1,
-                    'fs': 0,
-                    'modestbranding': 1,
-                    'rel': 0,
-                    'origin': 'https://www.youtube.com'
-                },
-                events: {
-                    'onReady': onPlayerReady,
-                    'onStateChange': onPlayerStateChange,
-                    'onError': onPlayerError
-                }
-            });
-        }
-        function onPlayerReady(event) {
+            isApiReady = true;
             window.webkit.messageHandlers.neonwaveBridge.postMessage({ type: 'ready' });
+            if (pendingId) {
+                var id = pendingId;
+                pendingId = null;
+                playVideoId(id);
+            }
+        }
+
+        function startProgressTimer() {
             if (progressTimer) clearInterval(progressTimer);
             progressTimer = setInterval(function() {
                 if (player && typeof player.getCurrentTime === 'function' && typeof player.getDuration === 'function') {
+                    var cur = player.getCurrentTime() || 0;
+                    var dur = player.getDuration() || 0;
                     window.webkit.messageHandlers.neonwaveBridge.postMessage({
                         type: 'time',
-                        current: player.getCurrentTime() || 0,
-                        duration: player.getDuration() || 0
+                        current: cur,
+                        duration: dur
                     });
                 }
             }, 250);
         }
+
+        function onPlayerReady(event) {
+            window.webkit.messageHandlers.neonwaveBridge.postMessage({ type: 'ready' });
+            startProgressTimer();
+            try {
+                if (player) {
+                    if (player.unMute) player.unMute();
+                    if (player.setVolume) player.setVolume(100);
+                    if (player.playVideo) player.playVideo();
+                }
+            } catch(e) {}
+        }
+
         function onPlayerStateChange(event) {
             // 1: PLAYING, 2: PAUSED, 0: ENDED, 3: BUFFERING
             window.webkit.messageHandlers.neonwaveBridge.postMessage({
                 type: 'state',
                 state: event.data
             });
-            // If the video pauses right after starting without user input (common on Topic tracks and WebKit autoplay policy), auto-resume
-            if (event.data === 2 && !userRequestedPause && (Date.now() - lastPlayRequestTime) < 2500) {
+            if (event.data === 1) { // PLAYING
+                startProgressTimer();
+            }
+            if (event.data === 2 && !userRequestedPause && (Date.now() - lastPlayRequestTime) < 3000) {
                 setTimeout(function() {
                     try {
                         if (player && !userRequestedPause) {
@@ -122,16 +130,46 @@ final class YouTubePlayer: NSObject, ObservableObject, WKScriptMessageHandler, W
                 }, 120);
             }
         }
+
         function onPlayerError(event) {
             window.webkit.messageHandlers.neonwaveBridge.postMessage({
                 type: 'error',
                 code: event.data
             });
         }
+
         function playVideoId(id) {
+            if (!id) return;
             lastPlayRequestTime = Date.now();
             userRequestedPause = false;
-            if (player) {
+
+            if (!isApiReady || typeof YT === 'undefined' || !YT.Player) {
+                pendingId = id;
+                return;
+            }
+
+            if (!player) {
+                player = new YT.Player('player', {
+                    width: '100%',
+                    height: '100%',
+                    videoId: id,
+                    playerVars: {
+                        'playsinline': 1,
+                        'autoplay': 1,
+                        'controls': 0,
+                        'disablekb': 1,
+                        'fs': 0,
+                        'modestbranding': 1,
+                        'rel': 0,
+                        'origin': window.location.origin
+                    },
+                    events: {
+                        'onReady': onPlayerReady,
+                        'onStateChange': onPlayerStateChange,
+                        'onError': onPlayerError
+                    }
+                });
+            } else {
                 try {
                     if (player.unMute) player.unMute();
                     if (player.setVolume) player.setVolume(100);
@@ -149,22 +187,27 @@ final class YouTubePlayer: NSObject, ObservableObject, WKScriptMessageHandler, W
                         if (player && player.playVideo && !userRequestedPause) player.playVideo();
                     } catch(e) {}
                 }, 300);
-            } else {
-                setTimeout(function() { playVideoId(id); }, 150);
             }
         }
+
         function resume() {
             userRequestedPause = false;
             lastPlayRequestTime = Date.now();
-            if (player && player.unMute) player.unMute();
-            if (player && player.setVolume) player.setVolume(100);
-            if (player && player.playVideo) player.playVideo();
+            if (player) {
+                if (player.unMute) player.unMute();
+                if (player.setVolume) player.setVolume(100);
+                if (player.playVideo) player.playVideo();
+            }
         }
+
         function pause() {
             userRequestedPause = true;
             if (player && player.pauseVideo) player.pauseVideo();
         }
-        function seek(sec) { if (player && player.seekTo) player.seekTo(sec, true); }
+
+        function seek(sec) {
+            if (player && player.seekTo) player.seekTo(sec, true);
+        }
         </script>
         </body>
         </html>
@@ -211,11 +254,12 @@ final class YouTubePlayer: NSObject, ObservableObject, WKScriptMessageHandler, W
     func playVideo(_ videoId: String) {
         currentVideoId = videoId
         _ = webView
-        guard isReady else {
-            pendingVideoId = videoId
-            return
+        let safeId = videoId.replacingOccurrences(of: "'", with: "").replacingOccurrences(of: "\\", with: "")
+        webView.evaluateJavaScript("playVideoId('\(safeId)');") { [weak self] _, error in
+            if error != nil {
+                self?.pendingVideoId = videoId
+            }
         }
-        webView.evaluateJavaScript("playVideoId('\(videoId)');")
     }
 
     func resume() {

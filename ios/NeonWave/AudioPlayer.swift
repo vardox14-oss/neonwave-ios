@@ -64,6 +64,33 @@ private final class SilentAudioKeepAlive {
     }
 }
 
+enum CrossfadeMath {
+    static let preloadLead: Double = 5
+    static let minimumFade: Double = 1
+
+    /// Equal-power curve: out² + in² = 1, so perceived loudness stays constant through the overlap.
+    static func gains(progress: Double) -> (out: Float, in: Float) {
+        let t = progress.isFinite ? min(1, max(0, progress)) : 1
+        return (Float(cos(t * .pi / 2)), Float(sin(t * .pi / 2)))
+    }
+
+    static func effectiveFade(setting: Double, outgoingLength: Double, incomingLength: Double) -> Double {
+        guard setting > 0, outgoingLength > 0 else { return 0 }
+        let shortest = incomingLength > 0 ? min(outgoingLength, incomingLength) : outgoingLength
+        return min(setting, shortest * 0.4)
+    }
+
+    static func upcomingIndex(current: Int, count: Int, shuffle: Bool, repeatMode: RepeatMode, random: (Range<Int>) -> Int = { Int.random(in: $0) }) -> Int? {
+        guard count > 0, repeatMode != .one else { return nil }
+        if shuffle && count > 1 {
+            let pick = random(0..<(count - 1))
+            return pick >= current ? pick + 1 : pick
+        }
+        if current + 1 < count { return current + 1 }
+        return repeatMode == .all ? 0 : nil
+    }
+}
+
 @MainActor final class AudioPlayer: ObservableObject {
     @Published private(set) var current: Track?
     @Published private(set) var queue: [Track] = []
@@ -86,14 +113,26 @@ private final class SilentAudioKeepAlive {
     @Published private(set) var songCounter: Int = 0
     var isWaveEffect: Bool { songCounter % 2 != 0 }
 
-    private let player = AVPlayer()
+    @Published var crossfadeSeconds: Double = UserDefaults.standard.object(forKey: "nw.crossfadeSeconds") as? Double ?? 6 {
+        didSet { UserDefaults.standard.set(crossfadeSeconds, forKey: "nw.crossfadeSeconds") }
+    }
+    @Published private(set) var isCrossfading = false
+
+    // Two players alternate: `player` is always the audible/current track,
+    // `standbyPlayer` preloads the next one, then tails out the previous one during a fade.
+    private var player = AVPlayer()
+    private var standbyPlayer = AVPlayer()
+    private var fadeOutPlayer: AVPlayer?
+    private var fadeTimer: Timer?
+    private var plannedIndex: Int?
+    private var plannedTrackID: String?
     private lazy var appleMusicPlayer = ApplicationMusicPlayer.shared
     private var isAppleMusicActive = false
     private var isYouTubeActive = false
     private var resolveTask: Task<Void, Never>?
-    private var timeObserver: Any?
+    private var timeObservers: [Any] = []
     private var statusObserver: NSKeyValueObservation?
-    private var playbackObserver: NSKeyValueObservation?
+    private var playbackObservers: [NSKeyValueObservation] = []
     private var observers: [NSObjectProtocol] = []
     private var sleepTask: Task<Void, Never>?
     private var lyricsTask: Task<Void, Never>?
@@ -109,48 +148,8 @@ private final class SilentAudioKeepAlive {
     private var musicKitCompletedTrackID: String?
 
     init() {
-        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.25, preferredTimescale: 600), queue: .main) { [weak self] time in
-            Task { @MainActor in
-                guard let self, !self.isYouTubeActive else { return }
-                self.elapsed = time.seconds.isFinite ? time.seconds : 0
-
-                // ── Durée affichée ──────────────────────────────────────────
-                // On préfère la durée Spotify (spotifyDuration) si elle est connue.
-                // La durée du fichier YouTube peut contenir du silence après la chanson.
-                let length = self.player.currentItem?.duration.seconds ?? 0
-                if length.isFinite && length > 0 {
-                    let displayDuration = self.spotifyDuration > 0 ? self.spotifyDuration : length
-                    if self.duration <= 0 || abs(self.duration - displayDuration) > 1 {
-                        self.duration = displayDuration
-                        if self.queue.indices.contains(self.index) {
-                            self.queue[self.index].duration = displayDuration
-                            self.current = self.queue[self.index]
-                        }
-                    }
-                    if self.lyricsRequestedDuration == 0 || abs(self.lyricsRequestedDuration - displayDuration) > 2 {
-                        self.fetchLyricsForCurrent(preferredDuration: displayDuration)
-                    }
-                }
-
-                // ── Auto-avance si la chanson est terminée mais le stream continue ──
-                // (ex: vidéo YouTube de 4min pour une chanson de 2min05)
-                if self.spotifyDuration > 0 && self.isPlaying && self.elapsed > self.spotifyDuration + 2.0 {
-                    self.next(automatic: true)
-                    return
-                }
-
-                self.updateActiveLyric()
-                self.updateNowPlaying()
-            }
-        }
-        playbackObserver = player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
-            Task { @MainActor in
-                guard let self, !self.isYouTubeActive else { return }
-                self.isPlaying = self.player.timeControlStatus == .playing
-                self.isBuffering = self.player.timeControlStatus == .waitingToPlayAtSpecifiedRate
-                self.updateNowPlaying()
-            }
-        }
+        installObservers(on: player)
+        installObservers(on: standbyPlayer)
         observers.append(NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: nil, queue: .main) { [weak self] notification in
             Task { @MainActor in
                 guard let self, !self.isYouTubeActive, let ended = notification.object as? AVPlayerItem, ended === self.player.currentItem else { return }
@@ -202,6 +201,215 @@ private final class SilentAudioKeepAlive {
         commands.changePlaybackPositionCommand.addTarget { [weak self] event in
             guard let event = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
             Task { @MainActor in self?.seek(event.positionTime) }; return .success
+        }
+    }
+
+    private func installObservers(on observed: AVPlayer) {
+        let observedID = ObjectIdentifier(observed)
+        timeObservers.append(observed.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.25, preferredTimescale: 600), queue: .main) { [weak self] time in
+            Task { @MainActor in
+                guard let self, ObjectIdentifier(self.player) == observedID, !self.isYouTubeActive else { return }
+                self.handleTick(time)
+            }
+        })
+        playbackObservers.append(observed.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor in
+                guard let self, ObjectIdentifier(self.player) == observedID, !self.isYouTubeActive else { return }
+                self.isPlaying = self.player.timeControlStatus == .playing
+                self.isBuffering = self.player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+                self.updateNowPlaying()
+            }
+        })
+    }
+
+    private func handleTick(_ time: CMTime) {
+        elapsed = time.seconds.isFinite ? time.seconds : 0
+
+        // ── Durée affichée ──────────────────────────────────────────
+        // On préfère la durée Spotify (spotifyDuration) si elle est connue.
+        // La durée du fichier YouTube peut contenir du silence après la chanson.
+        let length = player.currentItem?.duration.seconds ?? 0
+        if length.isFinite && length > 0 {
+            let displayDuration = spotifyDuration > 0 ? spotifyDuration : length
+            if duration <= 0 || abs(duration - displayDuration) > 1 {
+                duration = displayDuration
+                if queue.indices.contains(index) {
+                    queue[index].duration = displayDuration
+                    current = queue[index]
+                }
+            }
+            if lyricsRequestedDuration == 0 || abs(lyricsRequestedDuration - displayDuration) > 2 {
+                fetchLyricsForCurrent(preferredDuration: displayDuration)
+            }
+        }
+
+        if evaluateCrossfade() { return }
+
+        // ── Auto-avance si la chanson est terminée mais le stream continue ──
+        // (ex: vidéo YouTube de 4min pour une chanson de 2min05)
+        if spotifyDuration > 0 && isPlaying && elapsed > spotifyDuration + 2.0 {
+            next(automatic: true)
+            return
+        }
+
+        updateActiveLyric()
+        updateNowPlaying()
+    }
+
+    // MARK: - Crossfade (downloaded files only: MusicKit and the YouTube webview expose no volume control)
+
+    /// Returns true when a fade was just started (the tick must stop: state now describes the new track).
+    private func evaluateCrossfade() -> Bool {
+        guard crossfadeSeconds > 0, !isCrossfading, !isAppleMusicActive, !isYouTubeActive,
+              player.timeControlStatus == .playing,
+              let current, library?.localURL(current) != nil,
+              let item = player.currentItem else { return false }
+        let itemLength = item.duration.seconds
+        let now = player.currentTime().seconds
+        guard itemLength.isFinite, itemLength > 0, now.isFinite else { return false }
+        // Same cut-off as the auto-advance below, so the fade ends exactly where the song would.
+        let end = spotifyDuration > 0 ? min(itemLength, spotifyDuration + 2) : itemLength
+        let timeLeft = end - now
+        guard timeLeft > 0 else { return false }
+
+        let roughFade = CrossfadeMath.effectiveFade(setting: crossfadeSeconds, outgoingLength: end, incomingLength: 0)
+        guard roughFade >= CrossfadeMath.minimumFade else { return false }
+        if timeLeft <= roughFade + CrossfadeMath.preloadLead { preparePlannedTrack() }
+
+        guard let nextIndex = plannedIndex, queue.indices.contains(nextIndex), queue[nextIndex].id == plannedTrackID,
+              let incoming = standbyPlayer.currentItem, incoming.status == .readyToPlay else { return false }
+        let incomingLength = incoming.duration.seconds
+        let fade = CrossfadeMath.effectiveFade(setting: crossfadeSeconds, outgoingLength: end, incomingLength: incomingLength.isFinite ? incomingLength : 0)
+        guard fade >= CrossfadeMath.minimumFade, timeLeft <= fade else { return false }
+        beginCrossfade(to: nextIndex, over: timeLeft)
+        return true
+    }
+
+    private func preparePlannedTrack() {
+        if let planned = plannedIndex, queue.indices.contains(planned), queue[planned].id == plannedTrackID {
+            let stillValid = shuffle
+                ? planned != index
+                : planned == CrossfadeMath.upcomingIndex(current: index, count: queue.count, shuffle: false, repeatMode: repeatMode)
+            if stillValid { return }
+        }
+        discardPlannedTrack()
+        guard let nextIndex = CrossfadeMath.upcomingIndex(current: index, count: queue.count, shuffle: shuffle, repeatMode: repeatMode) else { return }
+        plannedIndex = nextIndex
+        plannedTrackID = queue[nextIndex].id
+        // Streams and Apple Music can't be faded: keep the plan (so shuffle doesn't re-roll every tick) without loading anything.
+        guard let url = library?.localURL(queue[nextIndex]) else { return }
+        standbyPlayer.volume = 0
+        standbyPlayer.automaticallyWaitsToMinimizeStalling = false
+        standbyPlayer.replaceCurrentItem(with: AVPlayerItem(url: url))
+    }
+
+    private func discardPlannedTrack() {
+        plannedIndex = nil
+        plannedTrackID = nil
+        if !isCrossfading {
+            standbyPlayer.pause()
+            standbyPlayer.replaceCurrentItem(with: nil)
+        }
+    }
+
+    private func beginCrossfade(to nextIndex: Int, over fadeDuration: Double) {
+        let outgoing = player
+        let incoming = standbyPlayer
+        plannedIndex = nil
+        plannedTrackID = nil
+        if shuffle { shuffleHistory.append(index) }
+        index = nextIndex
+        player = incoming
+        standbyPlayer = outgoing
+        fadeOutPlayer = outgoing
+        isCrossfading = true
+
+        // The UI switches to the new song as soon as it starts fading in, like Apple Music.
+        let target = queue[index]
+        resetState(for: target)
+        isPlaying = true
+        isBuffering = false
+        if let item = incoming.currentItem { observeLocalItem(item) }
+        incoming.volume = 0
+        incoming.playImmediately(atRate: 1.0)
+        fetchLyricsForCurrent(preferredDuration: target.duration)
+        library?.recordPlay(target)
+
+        let start = ProcessInfo.processInfo.systemUptime
+        fadeTimer?.invalidate()
+        let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.stepCrossfade(startedAt: start, duration: fadeDuration) }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        fadeTimer = timer
+    }
+
+    private func stepCrossfade(startedAt start: TimeInterval, duration fadeDuration: Double) {
+        guard isCrossfading, let outgoing = fadeOutPlayer else { return }
+        let progress = (ProcessInfo.processInfo.systemUptime - start) / max(fadeDuration, 0.01)
+        let gains = CrossfadeMath.gains(progress: progress)
+        outgoing.volume = gains.out
+        player.volume = gains.in
+        if progress >= 1 { finishCrossfade() }
+    }
+
+    /// Ends the fade immediately: the previous song stops, the new one goes to full volume.
+    private func finishCrossfade() {
+        fadeTimer?.invalidate()
+        fadeTimer = nil
+        if let outgoing = fadeOutPlayer {
+            outgoing.pause()
+            outgoing.replaceCurrentItem(with: nil)
+            outgoing.volume = 1
+        }
+        fadeOutPlayer = nil
+        player.volume = 1
+        isCrossfading = false
+    }
+
+    var fadeSnapshot: (outgoingVolume: Float, incomingVolume: Float, outgoingPlaying: Bool)? {
+        guard isCrossfading, let outgoing = fadeOutPlayer else { return nil }
+        return (outgoing.volume, player.volume, outgoing.timeControlStatus == .playing)
+    }
+
+    private func cancelCrossfade() {
+        if isCrossfading { finishCrossfade() }
+        discardPlannedTrack()
+        player.volume = 1
+    }
+
+    private func resetState(for target: Track) {
+        spotifyDuration = target.duration > 10 ? target.duration : 0
+        songCounter += 1
+        current = target; elapsed = 0; duration = target.duration; lyricsOffset = 0; lyricsRequestedDuration = 0
+        lyricsTask?.cancel(); lyricsFallbackTask?.cancel(); lyrics = []; plainLyrics = nil; activeLyricIndex = nil; loadingLyrics = true
+        updateNowPlaying(includeArtwork: true)
+    }
+
+    private func observeLocalItem(_ item: AVPlayerItem) {
+        statusObserver = item.observe(\.status, options: [.new, .initial]) { [weak self] item, _ in
+            Task { @MainActor in
+                guard let self, item === self.player.currentItem else { return }
+                if item.status == .failed {
+                    self.error = "Ce fichier audio ne peut pas être lu."
+                    self.pause()
+                } else if item.status == .readyToPlay {
+                    let itemDur = item.duration.seconds
+                    if itemDur.isFinite && itemDur > 0 {
+                        if self.duration <= 0 || abs(self.duration - itemDur) > 1 {
+                            self.duration = itemDur
+                            if self.queue.indices.contains(self.index) {
+                                self.queue[self.index].duration = itemDur
+                                self.current = self.queue[self.index]
+                            }
+                        }
+                        if self.lyricsRequestedDuration == 0 || abs(self.lyricsRequestedDuration - itemDur) > 2 {
+                            self.fetchLyricsForCurrent(preferredDuration: itemDur)
+                        }
+                        self.updateNowPlaying()
+                    }
+                }
+            }
         }
     }
 
@@ -329,21 +537,18 @@ private final class SilentAudioKeepAlive {
         guard queue.indices.contains(index) else { stop(); return }
         let target = queue[index]
         resolveTask?.cancel()
+        cancelCrossfade()
 
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [])
         try? AVAudioSession.sharedInstance().setActive(true)
         // Mémoriser la durée Spotify AVANT de charger le stream YouTube
         // (le stream peut être plus long que la chanson réelle)
-        spotifyDuration = target.duration > 10 ? target.duration : 0
-        songCounter += 1
-        current = target; elapsed = 0; duration = target.duration; lyricsOffset = 0; lyricsRequestedDuration = 0
-        lyricsTask?.cancel(); lyricsFallbackTask?.cancel(); lyrics = []; plainLyrics = nil; activeLyricIndex = nil; loadingLyrics = true
-        updateNowPlaying(includeArtwork: true)
+        resetState(for: target)
 
         // 1. If downloaded / imported locally, use native AVPlayer
         if let localURL = library?.localURL(target) {
+            if isAppleMusicActive { appleMusicPlayer.stop() }
             isAppleMusicActive = false
-            appleMusicPlayer.stop()
             isYouTubeActive = false
             SilentAudioKeepAlive.shared.stop()
 #if !APPSTORE
@@ -351,30 +556,7 @@ private final class SilentAudioKeepAlive {
 #endif
 
             let item = AVPlayerItem(url: localURL)
-            statusObserver = item.observe(\.status, options: [.new, .initial]) { [weak self] item, _ in
-                Task { @MainActor in
-                    guard let self else { return }
-                    if item.status == .failed {
-                        self.error = "Ce fichier audio ne peut pas être lu."
-                        self.pause()
-                    } else if item.status == .readyToPlay {
-                        let itemDur = item.duration.seconds
-                        if itemDur.isFinite && itemDur > 0 {
-                            if self.duration <= 0 || abs(self.duration - itemDur) > 1 {
-                                self.duration = itemDur
-                                if self.queue.indices.contains(self.index) {
-                                    self.queue[self.index].duration = itemDur
-                                    self.current = self.queue[self.index]
-                                }
-                            }
-                            if self.lyricsRequestedDuration == 0 || abs(self.lyricsRequestedDuration - itemDur) > 2 {
-                                self.fetchLyricsForCurrent(preferredDuration: itemDur)
-                            }
-                            self.updateNowPlaying()
-                        }
-                    }
-                }
-            }
+            observeLocalItem(item)
             player.replaceCurrentItem(with: item)
             player.automaticallyWaitsToMinimizeStalling = true
             player.playImmediately(atRate: 1.0)
@@ -452,6 +634,13 @@ private final class SilentAudioKeepAlive {
         musicKitCompletedTrackID = nil
         player.pause()
         player.replaceCurrentItem(with: nil)
+        // Reset du ApplicationMusicPlayer : sans ça, après plusieurs heures
+        // la queue précédente reste dans un état stale et play() échoue en silence
+        // (le symptôme "le matin ça marche, le soir plus").
+        appleMusicPlayer.stop()
+        // MusicKit gère sa propre session audio — on désactive la nôtre pour
+        // éviter le conflit qui bloque le premier play().
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         SilentAudioKeepAlive.shared.stop()
 #if !APPSTORE
         YouTubePlayer.shared.stop()
@@ -471,6 +660,10 @@ private final class SilentAudioKeepAlive {
                 }
                 guard self.current?.id == target.id else { return }
                 self.appleMusicPlayer.queue = ApplicationMusicPlayer.Queue(for: [song], startingAt: song)
+                // MusicKit: la queue doit être préparée avant play(), sinon le premier
+                // appel échoue silencieusement et il faut re-tapoter pour que ça démarre.
+                try await self.appleMusicPlayer.prepareToPlay()
+                guard self.current?.id == target.id else { return }
                 try await self.appleMusicPlayer.play()
                 self.isPlaying = true
                 self.isBuffering = false
@@ -625,6 +818,7 @@ private final class SilentAudioKeepAlive {
 
     func pause() {
         bufferingWatchdogTask?.cancel()
+        cancelCrossfade()
         if isAppleMusicActive {
             appleMusicPlayer.pause()
         } else if isYouTubeActive {
@@ -674,6 +868,7 @@ private final class SilentAudioKeepAlive {
 
     func seek(_ seconds: Double) {
         guard seconds.isFinite else { return }
+        cancelCrossfade()
         let targetTime = min(max(0, seconds), duration > 0 ? duration : seconds)
         elapsed = targetTime
         if isAppleMusicActive {
@@ -730,13 +925,14 @@ private final class SilentAudioKeepAlive {
         resolveTask?.cancel()
         lyricsTask?.cancel()
         lyricsFallbackTask?.cancel()
+        cancelCrossfade()
         if isYouTubeActive {
 #if !APPSTORE
             YouTubePlayer.shared.stop()
 #endif
             SilentAudioKeepAlive.shared.stop()
         }
-        appleMusicPlayer.stop()
+        if isAppleMusicActive { appleMusicPlayer.stop() }
         player.pause()
         player.replaceCurrentItem(with: nil)
         isYouTubeActive = false
