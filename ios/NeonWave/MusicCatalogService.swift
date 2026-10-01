@@ -355,7 +355,12 @@ enum MusicCatalogService {
                     }
                     return nil
                 }()
-                let finalStreamURL = sURL ?? (await serverStreamURL(videoId: resolved.videoId))
+                let finalStreamURL: URL?
+                if let sURL {
+                    finalStreamURL = sURL
+                } else {
+                    finalStreamURL = await serverStreamURL(videoId: resolved.videoId)
+                }
                 return ResolvedMedia(
                     videoId: resolved.videoId,
                     duration: resolved.duration,
