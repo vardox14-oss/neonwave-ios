@@ -25,6 +25,7 @@ enum MusicCatalogService {
         let artist: String?
         let spotifyId: String?
         let thumbnail: String?
+        let streamPath: String?
     }
 
     struct ResolvedMedia {
@@ -34,6 +35,7 @@ enum MusicCatalogService {
         let artist: String?
         let spotifyId: String?
         let thumbnail: String?
+        let streamURL: URL?
     }
 
     private struct StreamTicketResponse: Decodable {
@@ -244,11 +246,16 @@ enum MusicCatalogService {
         // Resolve and consume the signed media URL on the same device/network.
         // This avoids the VPS IP being used for YouTube media extraction.
         if let directURL = await deviceAudioURL(videoId: videoId) { return directURL }
+        return await serverStreamURL(videoId: videoId)
+    }
+
+    static func serverStreamURL(videoId: String) async -> URL? {
         guard !Task.isCancelled else { return nil }
         guard let baseURL = AppConfiguration.apiURL,
               let response: StreamTicketResponse = try? await APIClient().call(
                 "api/music/streams/\(videoId)/ticket",
-                method: "POST"
+                method: "POST",
+                authenticated: false
               ) else { return nil }
         return URL(string: response.path, relativeTo: baseURL)?.absoluteURL
     }
@@ -342,19 +349,28 @@ enum MusicCatalogService {
             ]
             if let resolved: ResolveResponse = try? await APIClient().call(path, authenticated: false, queryItems: query), !resolved.videoId.isEmpty {
                 ytCache[key] = resolved.videoId
+                let sURL: URL? = {
+                    if let streamPath = resolved.streamPath, let baseURL = AppConfiguration.apiURL {
+                        return URL(string: streamPath, relativeTo: baseURL)?.absoluteURL
+                    }
+                    return nil
+                }()
+                let finalStreamURL = sURL ?? (await serverStreamURL(videoId: resolved.videoId))
                 return ResolvedMedia(
                     videoId: resolved.videoId,
                     duration: resolved.duration,
                     title: resolved.title,
                     artist: resolved.artist,
                     spotifyId: resolved.spotifyId ?? spotifyId,
-                    thumbnail: resolved.thumbnail
+                    thumbnail: resolved.thumbnail,
+                    streamURL: finalStreamURL
                 )
             }
         }
 
         if let vid = await resolveYouTubeId(title: title, artist: artist, duration: duration, spotifyId: spotifyId) {
-            return ResolvedMedia(videoId: vid, duration: duration > 0 ? duration : nil, title: title, artist: artist, spotifyId: spotifyId, thumbnail: nil)
+            let streamURL = await serverStreamURL(videoId: vid)
+            return ResolvedMedia(videoId: vid, duration: duration > 0 ? duration : nil, title: title, artist: artist, spotifyId: spotifyId, thumbnail: nil, streamURL: streamURL)
         }
         return nil
     }
@@ -469,6 +485,18 @@ enum MusicCatalogService {
     }
 
     static func resolveAlternativeYouTubeId(title: String, artist: String, excludeVideoId: String) async -> String? {
+        if AppConfiguration.apiURL != nil {
+            let query = [
+                URLQueryItem(name: "title", value: title),
+                URLQueryItem(name: "artist", value: artist),
+                URLQueryItem(name: "currentVideoId", value: excludeVideoId)
+            ]
+            if let resolved: ResolveResponse = try? await APIClient().call("api/music/resolve-by-metadata", authenticated: false, queryItems: query),
+               !resolved.videoId.isEmpty, resolved.videoId != excludeVideoId {
+                return resolved.videoId
+            }
+        }
+
         let cleanTitle = title
             .replacingOccurrences(of: "(feat.", with: "")
             .replacingOccurrences(of: "(ft.", with: "")

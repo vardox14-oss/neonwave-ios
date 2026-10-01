@@ -458,9 +458,14 @@ enum CrossfadeMath {
             Task { @MainActor in
                 guard let self, self.isYouTubeActive, let cur = self.current else { return }
                 self.bufferingWatchdogTask?.cancel()
-                // If Topic track is blocked by YouTube embed rules (Error 101 or 150), fallback to alternative non-blocked video
+                // If Topic track is blocked by YouTube embed rules (Error 101 or 150), fallback to server stream or alternative non-blocked video
                 Task {
-                    if let altVid = await MusicCatalogService.resolveAlternativeYouTubeId(title: cur.title, artist: cur.artist, excludeVideoId: cur.videoId ?? "") {
+                    if let vid = cur.videoId, let streamURL = await MusicCatalogService.serverStreamURL(videoId: vid) {
+                        await MainActor.run {
+                            guard self.current?.id == cur.id else { return }
+                            self.startAVPlayerPlayback(url: streamURL)
+                        }
+                    } else if let altVid = await MusicCatalogService.resolveAlternativeYouTubeId(title: cur.title, artist: cur.artist, excludeVideoId: cur.videoId ?? "") {
                         await MainActor.run {
                             guard self.current?.id == cur.id else { return }
                             if self.queue.indices.contains(self.index) {
@@ -471,7 +476,7 @@ enum CrossfadeMath {
                         }
                     } else if let stream = cur.streamURL, let url = URL(string: stream) {
                         await MainActor.run {
-                            self.startAVPlayerFallback(url: url)
+                            self.startAVPlayerPlayback(url: url)
                         }
                     } else {
                         await MainActor.run {
@@ -613,11 +618,15 @@ enum CrossfadeMath {
                             self.fetchLyricsForCurrent(preferredDuration: self.duration)
                         }
                         self.updateNowPlaying(includeArtwork: true)
-                        self.startNativeOnlinePlayback(videoId: media.videoId, trackID: target.id)
+                        if let streamURL = media.streamURL {
+                            self.startAVPlayerPlayback(url: streamURL, fallbackVideoId: media.videoId)
+                        } else {
+                            self.startNativeOnlinePlayback(videoId: media.videoId, trackID: target.id)
+                        }
                     } else if let existingVid = target.videoId, !existingVid.isEmpty {
                         self.startNativeOnlinePlayback(videoId: existingVid, trackID: target.id)
                     } else if let stream = target.streamURL, let url = URL(string: stream) {
-                        self.startAVPlayerFallback(url: url)
+                        self.startAVPlayerPlayback(url: url)
                     } else {
                         self.error = "Impossible de charger ce titre."
                         self.pause()
@@ -692,7 +701,26 @@ enum CrossfadeMath {
 
     private func startNativeOnlinePlayback(videoId: String, trackID: String) {
         resolveTask?.cancel()
-        startYouTubePlayback(videoId: videoId)
+        isYouTubeActive = false
+        isPlaying = false
+        isBuffering = true
+
+        Task { [weak self] in
+            guard let self else { return }
+            // 1. Try direct high-quality audio stream via native AVPlayer (bypasses YouTube iframe embed restrictions)
+            if let streamURL = await MusicCatalogService.serverStreamURL(videoId: videoId) {
+                await MainActor.run {
+                    guard self.current?.id == trackID else { return }
+                    self.startAVPlayerPlayback(url: streamURL, fallbackVideoId: videoId)
+                }
+            } else {
+                // 2. Fallback to YouTube embed player
+                await MainActor.run {
+                    guard self.current?.id == trackID else { return }
+                    self.startYouTubePlayback(videoId: videoId)
+                }
+            }
+        }
     }
 
     private func startYouTubePlayback(videoId: String) {
@@ -705,12 +733,18 @@ enum CrossfadeMath {
 
         bufferingWatchdogTask?.cancel()
         bufferingWatchdogTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(8))
+            try? await Task.sleep(for: .seconds(10))
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 guard let self, self.isYouTubeActive, self.isBuffering, !self.isPlaying, let cur = self.current else { return }
                 Task {
-                    if let altVid = await MusicCatalogService.resolveAlternativeYouTubeId(title: cur.title, artist: cur.artist, excludeVideoId: videoId) {
+                    // 1. Try server stream URL
+                    if let streamURL = await MusicCatalogService.serverStreamURL(videoId: videoId) {
+                        await MainActor.run {
+                            guard self.current?.id == cur.id, self.isYouTubeActive, !self.isPlaying else { return }
+                            self.startAVPlayerPlayback(url: streamURL)
+                        }
+                    } else if let altVid = await MusicCatalogService.resolveAlternativeYouTubeId(title: cur.title, artist: cur.artist, excludeVideoId: videoId) {
                         await MainActor.run {
                             guard self.current?.id == cur.id, self.isYouTubeActive, !self.isPlaying else { return }
                             if self.queue.indices.contains(self.index) {
@@ -721,7 +755,7 @@ enum CrossfadeMath {
                         }
                     } else if let stream = cur.streamURL, let url = URL(string: stream) {
                         await MainActor.run {
-                            self.startAVPlayerFallback(url: url)
+                            self.startAVPlayerPlayback(url: url)
                         }
                     } else {
                         await MainActor.run {
@@ -734,16 +768,19 @@ enum CrossfadeMath {
         }
     }
 
-    private func startAVPlayerFallback(url: URL, fallbackVideoId: String? = nil) {
+    private func startAVPlayerPlayback(url: URL, fallbackVideoId: String? = nil) {
         isYouTubeActive = false
         bufferingWatchdogTask?.cancel()
         SilentAudioKeepAlive.shared.stop()
+#if !APPSTORE
         YouTubePlayer.shared.stop()
+#endif
         let item = AVPlayerItem(url: url)
         statusObserver = item.observe(\.status, options: [.new, .initial]) { [weak self] item, _ in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, item === self.player.currentItem else { return }
                 if item.status == .failed {
+                    print("⚠️ AVPlayer playback failed for \(url): \(String(describing: item.error))")
                     if let fallbackVideoId {
                         self.startYouTubePlayback(videoId: fallbackVideoId)
                     } else {
@@ -751,6 +788,9 @@ enum CrossfadeMath {
                         self.pause()
                     }
                 } else if item.status == .readyToPlay {
+                    self.bufferingWatchdogTask?.cancel()
+                    self.isPlaying = true
+                    self.isBuffering = false
                     let itemDur = item.duration.seconds
                     if itemDur.isFinite && itemDur > 0 {
                         if self.duration <= 0 || abs(self.duration - itemDur) > 1 {
@@ -771,9 +811,25 @@ enum CrossfadeMath {
         player.replaceCurrentItem(with: item)
         player.automaticallyWaitsToMinimizeStalling = true
         player.playImmediately(atRate: 1.0)
-        isPlaying = false; isBuffering = true
+        isPlaying = false
+        isBuffering = true
         if lyricsRequestedDuration == 0 { fetchLyricsForCurrent(preferredDuration: current?.duration ?? 0) }
         updateNowPlaying(includeArtwork: true)
+
+        bufferingWatchdogTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(25))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard let self, !self.isYouTubeActive, self.isBuffering, !self.isPlaying, self.player.currentItem === item else { return }
+                if let fallbackVideoId {
+                    print("⚠️ AVPlayer timed out after 25s, falling back to YouTube")
+                    self.startYouTubePlayback(videoId: fallbackVideoId)
+                } else {
+                    self.error = "Délai de chargement dépassé."
+                    self.isBuffering = false
+                }
+            }
+        }
     }
 
     private func fetchLyricsForCurrent(preferredDuration: Double) {
