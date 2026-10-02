@@ -97,7 +97,7 @@ struct PlayerView: View {
     @EnvironmentObject private var downloads: DownloadManager
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var mode: PlayerMode = .cover
+    @State private var isLyricsExpanded = false
     @State private var showQueue = false
     @State private var showTimer = false
     @State private var dragging = false
@@ -113,60 +113,60 @@ struct PlayerView: View {
             ZStack {
                 immersiveBackground(size: geo.size)
                 if let track = player.current {
-                    VStack(spacing: 0) {
-                        header(track)
-                            .padding(.top, topInset)
+                    if isLyricsExpanded {
+                        fullScreenLyricsView(track, size: geo.size, topInset: topInset, bottomInset: geo.safeAreaInsets.bottom)
+                            .transition(.asymmetric(
+                                insertion: .opacity.combined(with: .scale(scale: 0.96)),
+                                removal: .opacity.combined(with: .scale(scale: 0.96))
+                            ))
+                    } else {
+                        ScrollView(.vertical, showsIndicators: false) {
+                            VStack(spacing: 0) {
+                                // 1. Vue lecteur principale
+                                VStack(spacing: 0) {
+                                    header(track)
+                                        .padding(.top, topInset)
 
-                        Spacer(minLength: 8)
+                                    Spacer(minLength: 8)
 
-                        content(track, size: geo.size)
+                                    content(track, size: geo.size)
 
-                        Spacer(minLength: 16)
+                                    Spacer(minLength: 16)
 
-                        trackInfo(track)
+                                    trackInfo(track)
 
-                        Spacer(minLength: 14)
+                                    Spacer(minLength: 14)
 
-                        timeline
+                                    timeline
 
-                        Spacer(minLength: 16)
+                                    Spacer(minLength: 16)
 
-                        controls
+                                    controls
 
-                        Spacer(minLength: 22)
+                                    Spacer(minLength: 20)
 
-                        footer(track)
+                                    footer(track)
+                                }
+                                .padding(.horizontal, 28)
+                                .padding(.bottom, 20)
+                                .frame(minHeight: max(600, geo.size.height - 80))
+
+                                // 2. Carte d'aperçu des paroles style Spotify
+                                lyricsPreviewCard(track)
+                                    .padding(.horizontal, 20)
+                                    .padding(.bottom, max(36, geo.safeAreaInsets.bottom + 24))
+                            }
+                        }
+                        .transition(.asymmetric(
+                            insertion: .opacity.combined(with: .scale(scale: 0.96)),
+                            removal: .opacity.combined(with: .scale(scale: 0.96))
+                        ))
                     }
-                    .padding(.horizontal, 28)
-                    .padding(.bottom, max(14, geo.safeAreaInsets.bottom + 6))
-                    .frame(width: geo.size.width, height: geo.size.height)
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height)
+            .animation(.spring(response: 0.40, dampingFraction: 0.82), value: isLyricsExpanded)
         }
-        .gesture(
-            DragGesture(minimumDistance: 25)
-                .onEnded { value in
-                    let horizontal = value.translation.width
-                    let vertical = value.translation.height
-
-                    // Horizontal swipe: next / previous track in cover mode
-                    if mode == .cover && abs(horizontal) > 55 && abs(vertical) < 65 {
-                        if horizontal < 0 {
-                            player.next()
-                            library.haptic()
-                        } else {
-                            player.previous()
-                            library.haptic()
-                        }
-                    }
-                    // Vertical drag down: dismiss player
-                    else if vertical > 65 && abs(horizontal) < 110 {
-                        onClose?()
-                        dismiss()
-                    }
-                }
-        )
         .overlay(alignment: .top) {
             if let toast = downloads.toastMessage {
                 HStack(spacing: 10) {
@@ -282,7 +282,7 @@ struct PlayerView: View {
 
                 // 3. Vidéo Canvas si présente
                 if let canvasURL = canvasURL {
-                    LoopingCanvasVideo(url: canvasURL, isPlaying: player.isPlaying && mode == .cover)
+                    LoopingCanvasVideo(url: canvasURL, isPlaying: player.isPlaying && !isLyricsExpanded)
                         .frame(width: size.width, height: size.height)
                         .clipped()
                         .transition(.opacity.animation(.easeInOut(duration: 0.6)))
@@ -386,8 +386,7 @@ struct PlayerView: View {
     @ViewBuilder private func content(_ track: Track, size: CGSize) -> some View {
         let maxW = size.width - 56
         let dimension = min(maxW, min(330, max(220, size.height * 0.40)))
-        switch mode {
-        case .cover:
+        Group {
             if canvasURL != nil && !showArtworkOverlay {
                 VStack {
                     Spacer()
@@ -444,11 +443,30 @@ struct PlayerView: View {
                         }
                     }
             }
-        case .lyrics:
-            LyricsView(player: player)
-                .frame(maxWidth: .infinity, maxHeight: min(440, size.height * 0.50))
-                .transition(.opacity.combined(with: .scale(scale: 0.96)))
         }
+        .gesture(
+            DragGesture(minimumDistance: 30)
+                .onEnded { value in
+                    let horizontal = value.translation.width
+                    let vertical = value.translation.height
+
+                    // Swipe horizontal: morceau suivant / précédent
+                    if abs(horizontal) > 55 && abs(vertical) < 65 {
+                        if horizontal < 0 {
+                            player.next()
+                            library.haptic()
+                        } else {
+                            player.previous()
+                            library.haptic()
+                        }
+                    }
+                    // Glisser vers le bas: fermer le lecteur
+                    else if vertical > 75 && abs(horizontal) < 100 {
+                        onClose?()
+                        dismiss()
+                    }
+                }
+        )
     }
 
     private func trackInfo(_ track: Track) -> some View {
@@ -660,18 +678,18 @@ struct PlayerView: View {
 
     private func footer(_ track: Track) -> some View {
         HStack {
-            // 1. Lyrics Toggle (Apple Music style)
+            // 1. Lyrics Toggle
             Button {
                 Haptic.light()
                 withAnimation(reduceMotion ? nil : .spring(response: 0.40, dampingFraction: 0.82)) {
-                    mode = (mode == .cover ? .lyrics : .cover)
+                    isLyricsExpanded.toggle()
                 }
             } label: {
-                Image(systemName: mode == .lyrics ? "quote.bubble.fill" : "quote.bubble")
+                Image(systemName: isLyricsExpanded ? "quote.bubble.fill" : "quote.bubble")
                     .font(.system(size: 19, weight: .semibold))
-                    .foregroundStyle(mode == .lyrics ? .white : .white.opacity(0.55))
+                    .foregroundStyle(isLyricsExpanded ? .white : .white.opacity(0.55))
                     .frame(width: 44, height: 44)
-                    .background(mode == .lyrics ? .white.opacity(0.18) : .clear, in: Circle())
+                    .background(isLyricsExpanded ? .white.opacity(0.18) : .clear, in: Circle())
             }
             .buttonStyle(.plain)
 
@@ -698,6 +716,282 @@ struct PlayerView: View {
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 20)
         .frame(height: 48)
+    }
+
+    // MARK: - Spotify-Style Lyrics Preview Card
+    private func lyricsPreviewCard(_ track: Track) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            // Header: Title + Action Buttons (matching Spotify screenshot)
+            HStack {
+                Text("Lyrics")
+                    .font(.system(size: 19, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+
+                Spacer()
+
+                HStack(spacing: 8) {
+                    // Partager
+                    ShareLink(item: "\(track.title) - \(track.artist)") {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.85))
+                            .frame(width: 32, height: 32)
+                            .background(Color.white.opacity(0.14), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+
+                    // Bouton Agrandir (flèches en diagonale vers l'extérieur)
+                    Button {
+                        Haptic.medium()
+                        withAnimation(reduceMotion ? nil : .spring(response: 0.40, dampingFraction: 0.82)) {
+                            isLyricsExpanded = true
+                        }
+                    } label: {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 32, height: 32)
+                            .background(Color.white.opacity(0.18), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+
+                    // Bouton Chevron haut
+                    Button {
+                        Haptic.medium()
+                        withAnimation(reduceMotion ? nil : .spring(response: 0.40, dampingFraction: 0.82)) {
+                            isLyricsExpanded = true
+                        }
+                    } label: {
+                        Image(systemName: "chevron.up")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 32, height: 32)
+                            .background(Color.white.opacity(0.18), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            // Aperçu dynamique synchronisé des paroles
+            if player.loadingLyrics {
+                HStack(spacing: 10) {
+                    ProgressView().tint(.white).scaleEffect(0.9)
+                    Text("Chargement des paroles…")
+                        .font(.system(size: 15, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.70))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 22)
+            } else if !player.lyrics.isEmpty {
+                let activeIdx = player.activeLyricIndex ?? 0
+                let startIdx = max(0, activeIdx)
+                let endIdx = min(player.lyrics.count, startIdx + 4)
+                let previewSlice = Array(player.lyrics[startIdx..<endIdx])
+
+                VStack(alignment: .leading, spacing: 9) {
+                    ForEach(Array(previewSlice.enumerated()), id: \.element.id) { offset, line in
+                        let isCurrent = (startIdx + offset == activeIdx)
+                        let text = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !text.isEmpty {
+                            Text(text)
+                                .font(.system(size: isCurrent ? 23 : 20, weight: isCurrent ? .heavy : .semibold, design: .rounded))
+                                .foregroundStyle(isCurrent ? Color.white : Color.white.opacity(0.48))
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                                .shadow(color: isCurrent ? Color.white.opacity(0.35) : Color.clear, radius: 8)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 2)
+                .padding(.bottom, 6)
+                .animation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.75), value: activeIdx)
+            } else if let plain = player.plainLyrics, !plain.isEmpty {
+                let lines = plain.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(lines.prefix(3).enumerated()), id: \.offset) { _, line in
+                        Text(line)
+                            .font(.system(size: 20, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.78))
+                            .lineLimit(2)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 6)
+            } else {
+                HStack(spacing: 8) {
+                    Image(systemName: "music.mic")
+                        .font(.system(size: 16))
+                        .foregroundStyle(.white.opacity(0.45))
+                    Text("Paroles indisponibles pour ce titre")
+                        .font(.system(size: 15, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+                .padding(.vertical, 18)
+            }
+        }
+        .padding(20)
+        .background(
+            ZStack {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                NW.colors[track.colorIndex][0].opacity(0.38),
+                                Color.black.opacity(0.60)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            }
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Color.white.opacity(0.14), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.35), radius: 18, y: 6)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            Haptic.light()
+            withAnimation(reduceMotion ? nil : .spring(response: 0.40, dampingFraction: 0.82)) {
+                isLyricsExpanded = true
+            }
+        }
+    }
+
+    // MARK: - Full Screen Lyrics View (Karaoke Mode)
+    private func fullScreenLyricsView(_ track: Track, size: CGSize, topInset: CGFloat, bottomInset: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            // Header avec bouton Réduire
+            HStack {
+                Button {
+                    Haptic.light()
+                    withAnimation(reduceMotion ? nil : .spring(response: 0.40, dampingFraction: 0.82)) {
+                        isLyricsExpanded = false
+                    }
+                } label: {
+                    Image(systemName: "arrow.down.right.and.arrow.up.left")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 40, height: 40)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .overlay(Circle().stroke(Color.white.opacity(0.18), lineWidth: 0.8))
+                }
+                .buttonStyle(.plain)
+
+                Spacer()
+
+                VStack(spacing: 2) {
+                    Text(track.title)
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                    Text(track.artist)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.65))
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity)
+
+                Button {
+                    Haptic.light()
+                    withAnimation(reduceMotion ? nil : .spring(response: 0.40, dampingFraction: 0.82)) {
+                        isLyricsExpanded = false
+                    }
+                } label: {
+                    Image(systemName: "chevron.compact.down")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.70))
+                        .frame(width: 40, height: 40)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, topInset)
+            .padding(.bottom, 6)
+
+            // Vue des paroles interactive défilante
+            LyricsView(player: player)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            // Mini-lecteur flottant au bas des paroles
+            HStack(spacing: 12) {
+                CoverArt(track: track, imageURL: library.artworkURL(track), remoteURL: track.artworkURL, radius: 8)
+                    .frame(width: 42, height: 42)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(track.title)
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+
+                    GeometryReader { barGeo in
+                        let prog = player.duration > 0 ? min(1.0, max(0.0, player.elapsed / player.duration)) : 0.0
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Color.white.opacity(0.20)).frame(height: 3)
+                            Capsule().fill(Color.white).frame(width: barGeo.size.width * CGFloat(prog), height: 3)
+                        }
+                    }
+                    .frame(height: 3)
+
+                    HStack {
+                        Text(player.elapsed.clockTime)
+                        Spacer()
+                        Text(player.duration.clockTime)
+                    }
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.50))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                HStack(spacing: 8) {
+                    Button {
+                        Haptic.light()
+                        player.previous()
+                    } label: {
+                        Image(systemName: "backward.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 34, height: 34)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        Haptic.medium()
+                        player.toggle()
+                    } label: {
+                        Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 38, height: 38)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        Haptic.light()
+                        player.next()
+                    } label: {
+                        Image(systemName: "forward.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 34, height: 34)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color.white.opacity(0.14), lineWidth: 0.8))
+            .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
+            .padding(.horizontal, 18)
+            .padding(.bottom, max(12, bottomInset + 4))
+        }
+        .frame(width: size.width, height: size.height)
     }
 }
 
