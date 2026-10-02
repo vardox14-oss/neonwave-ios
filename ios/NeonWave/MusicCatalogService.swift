@@ -253,9 +253,8 @@ enum MusicCatalogService {
     }
 
     static func nativeStreamURL(videoId: String) async -> URL? {
-        // Resolve and consume the signed media URL on the same device/network.
-        // This avoids the VPS IP being used for YouTube media extraction.
-        if let directURL = await deviceAudioURL(videoId: videoId) { return directURL }
+        // Progressive M4A stream served by VPS with HTTP 206 Partial Content.
+        // 100% compatible with native AVPlayer, lockscreen controls, and background audio.
         return await serverStreamURL(videoId: videoId)
     }
 
@@ -381,7 +380,7 @@ enum MusicCatalogService {
                     }
                     return nil
                 }()
-                let finalStreamURL: URL? = await nativeStreamURL(videoId: resolved.videoId) ?? sURL
+                let finalStreamURL: URL? = sURL ?? await nativeStreamURL(videoId: resolved.videoId)
                 return ResolvedMedia(
                     videoId: resolved.videoId,
                     duration: resolved.duration,

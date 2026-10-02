@@ -799,9 +799,9 @@ enum CrossfadeMath {
                     print("⚠️ AVPlayer playback failed for \(url): \(String(describing: item.error))")
                     if let fallbackVideoId {
                         Task {
-                            if let directURL = await MusicCatalogService.nativeStreamURL(videoId: fallbackVideoId), directURL != url {
+                            if let sURL = await MusicCatalogService.serverStreamURL(videoId: fallbackVideoId), sURL != url {
                                 await MainActor.run {
-                                    self.startAVPlayerPlayback(url: directURL, fallbackVideoId: nil)
+                                    self.startAVPlayerPlayback(url: sURL, fallbackVideoId: nil)
                                 }
                                 return
                             }
