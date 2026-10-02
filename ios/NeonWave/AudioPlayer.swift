@@ -101,6 +101,7 @@ enum CrossfadeMath {
     @Published var shuffle = false
     @Published var repeatMode: RepeatMode = .off
     @Published private(set) var sleepUntil: Date?
+    @Published private(set) var sleepAtEndOfTrack = false
     @Published var error: String?
 
     // Paroles synchronisées (Karaoké)
@@ -1004,6 +1005,12 @@ enum CrossfadeMath {
     }
 
     func next(automatic: Bool = false) {
+        if automatic && sleepAtEndOfTrack {
+            sleepAtEndOfTrack = false
+            pause()
+            seek(0)
+            return
+        }
         guard !queue.isEmpty else { return }
         if automatic && repeatMode == .one { seek(0); resume(); return }
         if shuffle && queue.count > 1 {
@@ -1032,12 +1039,35 @@ enum CrossfadeMath {
 
     func setSleep(minutes: Int?) {
         sleepTask?.cancel()
+        sleepAtEndOfTrack = false
         guard let minutes else { sleepUntil = nil; return }
         sleepUntil = Date().addingTimeInterval(Double(minutes * 60))
         sleepTask = Task { [weak self] in
-            do { try await Task.sleep(for: .seconds(minutes * 60)) } catch { return }
-            self?.pause(); self?.sleepUntil = nil
+            do {
+                if minutes > 0 {
+                    let waitTime = max(0, Double(minutes * 60) - 3.0)
+                    try await Task.sleep(for: .seconds(waitTime))
+                }
+            } catch { return }
+            await self?.fadeOutAndPause()
+            self?.sleepUntil = nil
         }
+    }
+
+    func setSleepAtEndOfTrack() {
+        sleepTask?.cancel()
+        sleepUntil = nil
+        sleepAtEndOfTrack = true
+    }
+
+    private func fadeOutAndPause() async {
+        let initialVolume = player.volume
+        for step in (0...10).reversed() {
+            player.volume = initialVolume * Float(step) / 10.0
+            try? await Task.sleep(for: .milliseconds(300))
+        }
+        pause()
+        player.volume = initialVolume
     }
 
     func stop() {

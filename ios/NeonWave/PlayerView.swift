@@ -143,8 +143,22 @@ struct PlayerView: View {
         .sheet(isPresented: $showQueue) { QueueView() }
         .sheet(item: $selectedArtist) { artist in ArtistDetailView(artist: artist) }
         .confirmationDialog("Minuterie de sommeil", isPresented: $showTimer, titleVisibility: .visible) {
-            ForEach([15, 30, 45, 60, 90], id: \.self) { minutes in Button("Dans \(minutes) minutes") { player.setSleep(minutes: minutes) } }
-            if player.sleepUntil != nil { Button("Désactiver la minuterie", role: .destructive) { player.setSleep(minutes: nil) } }
+            ForEach([15, 30, 45, 60], id: \.self) { minutes in
+                Button("Dans \(minutes) minutes") {
+                    player.setSleep(minutes: minutes)
+                    Haptic.success()
+                }
+            }
+            Button("À la fin de ce morceau") {
+                player.setSleepAtEndOfTrack()
+                Haptic.success()
+            }
+            if player.sleepUntil != nil || player.sleepAtEndOfTrack {
+                Button("Désactiver la minuterie", role: .destructive) {
+                    player.setSleep(minutes: nil)
+                    Haptic.medium()
+                }
+            }
         }
         .onChange(of: player.current?.id) { _, value in if value == nil { dismiss() } }
         .task(id: "\(player.current?.id ?? "")-\(player.current?.spotifyId ?? "")") {
@@ -190,7 +204,7 @@ struct PlayerView: View {
                             .frame(width: size.width, height: size.height)
                             .scaleEffect(1.35)
                             .blur(radius: 54)
-                            .opacity(0.72)
+                            .opacity(0.68)
                             .clipped()
                     } else {
                         AsyncImage(url: track.artworkURL.flatMap(URL.init(string:))) { phase in
@@ -202,11 +216,10 @@ struct PlayerView: View {
                                     .frame(width: size.width, height: size.height)
                                     .scaleEffect(1.35)
                                     .blur(radius: 54)
-                                    .opacity(0.72)
+                                    .opacity(0.68)
                                     .clipped()
                             default:
-                                LinearGradient(colors: NW.colors[track.colorIndex],
-                                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                                Color.clear
                             }
                         }
                         .frame(width: size.width, height: size.height)
@@ -214,10 +227,11 @@ struct PlayerView: View {
                     }
                 }
 
-                RadialGradient(colors: [NW.colors[track.colorIndex][0].opacity(0.35), .clear], center: .topTrailing, startRadius: 40, endRadius: 460)
-                LinearGradient(colors: [.black.opacity(0.15), .black.opacity(0.40), NW.background.opacity(0.85)], startPoint: .top, endPoint: .bottom)
+                // 2. Mesh gradient liquide animé fluide
+                FluidMeshBackground(colors: NW.colors[track.colorIndex], isPlaying: player.isPlaying, reduceMotion: reduceMotion)
+                    .opacity(0.85)
 
-                // 2. Vidéo Canvas par-dessus quand elle est prête (mise en pause en mode Paroles pour économiser le GPU)
+                // 3. Vidéo Canvas par-dessus quand elle est prête (mise en pause en mode Paroles pour économiser le GPU)
                 if let canvasURL = canvasURL {
                     LoopingCanvasVideo(url: canvasURL, isPlaying: player.isPlaying && mode == .cover)
                         .frame(width: size.width, height: size.height)
@@ -261,9 +275,49 @@ struct PlayerView: View {
                     .lineLimit(1)
             }
             .frame(maxWidth: .infinity)
-            Spacer()
-            glassIcon("moon.zzz.fill", label: "Minuterie") { showTimer = true }
-                .foregroundStyle(player.sleepUntil == nil ? .white : NW.blue)
+            if let until = player.sleepUntil {
+                Button {
+                    Haptic.light()
+                    showTimer = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "moon.zzz.fill")
+                            .font(.system(size: 10, weight: .bold))
+                        Text(until, style: .timer)
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(NW.blue.opacity(0.25), in: Capsule())
+                    .overlay(Capsule().stroke(NW.blue.opacity(0.55), lineWidth: 1))
+                    .foregroundStyle(NW.cyan)
+                }
+                .buttonStyle(.plain)
+            } else if player.sleepAtEndOfTrack {
+                Button {
+                    Haptic.light()
+                    showTimer = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "moon.zzz.fill")
+                            .font(.system(size: 10, weight: .bold))
+                        Text("FIN DU TITRE")
+                            .font(.system(size: 9, weight: .heavy))
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(NW.blue.opacity(0.25), in: Capsule())
+                    .overlay(Capsule().stroke(NW.blue.opacity(0.55), lineWidth: 1))
+                    .foregroundStyle(NW.cyan)
+                }
+                .buttonStyle(.plain)
+            } else {
+                glassIcon("moon.zzz.fill", label: "Minuterie") {
+                    Haptic.light()
+                    showTimer = true
+                }
+                .foregroundStyle(.white.opacity(0.85))
+            }
         }
         .frame(maxWidth: .infinity)
         .frame(height: 48)
@@ -338,10 +392,10 @@ struct PlayerView: View {
             } else {
                 CoverArt(track: track, imageURL: library.artworkURL(track), remoteURL: track.artworkURL, radius: 28)
                     .frame(width: dimension, height: dimension)
-                    .shadow(color: .black.opacity(0.45), radius: 28, y: 18)
+                    .shadow(color: NW.colors[track.colorIndex][0].opacity(player.isPlaying ? 0.40 : 0.15), radius: player.isPlaying ? 35 : 18, y: player.isPlaying ? 20 : 10)
                     .overlay(RoundedRectangle(cornerRadius: 28).stroke(.white.opacity(0.12)))
-                    .scaleEffect(player.isPlaying || reduceMotion ? 1 : 0.96)
-                    .animation(reduceMotion ? nil : .spring(response: 0.6, dampingFraction: 0.86), value: player.isPlaying)
+                    .scaleEffect(player.isPlaying || reduceMotion ? 1.0 : 0.86)
+                    .animation(reduceMotion ? nil : .spring(response: 0.55, dampingFraction: 0.78), value: player.isPlaying)
                     .overlay(alignment: .topTrailing) {
                         if canvasURL != nil {
                             Button {
@@ -369,9 +423,10 @@ struct PlayerView: View {
 
     private func trackInfo(_ track: Track) -> some View {
         HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(track.title).font(.system(size: 22, weight: .bold, design: .rounded)).tracking(-0.5).lineLimit(1)
                 Button {
+                    Haptic.light()
                     selectedArtist = ArtistIdentifier(name: track.artist, spotifyId: track.spotifyId)
                 } label: {
                     HStack(spacing: 5) {
@@ -380,6 +435,21 @@ struct PlayerView: View {
                     }
                 }
                 .buttonStyle(.plain)
+
+                // Badge de qualité audio Pro
+                HStack(spacing: 6) {
+                    Text(library.localURL(track) != nil ? "HORS-LIGNE" : "LOSSLESS")
+                        .font(.system(size: 8.5, weight: .heavy, design: .monospaced))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2.5)
+                        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                        .foregroundStyle(.white.opacity(0.85))
+
+                    Text("AAC 256 KBPS • 48 KHZ")
+                        .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.40))
+                }
+                .padding(.top, 2)
             }.frame(maxWidth: .infinity, alignment: .leading)
             if let progress = downloads.progress[track.id] {
                 Button { downloads.cancel(track.id) } label: {
@@ -391,21 +461,44 @@ struct PlayerView: View {
                     .foregroundStyle(NW.blue)
             } else if track.canDownload {
                 glassIcon("arrow.down.circle", label: "Télécharger") {
+                    Haptic.medium()
                     downloads.download(track)
                 }
                 .foregroundStyle(NW.blue)
             }
-            glassIcon(library.snapshot.likedIDs.contains(track.id) ? "heart.fill" : "heart", label: "Favori") { library.toggleLike(track) }
-                .foregroundStyle(library.snapshot.likedIDs.contains(track.id) ? Color.pink : .white)
+            glassIcon(library.snapshot.likedIDs.contains(track.id) ? "heart.fill" : "heart", label: "Favori") {
+                Haptic.medium()
+                library.toggleLike(track)
+            }
+            .foregroundStyle(library.snapshot.likedIDs.contains(track.id) ? Color.pink : .white)
         }.frame(maxWidth: .infinity)
     }
 
     private var timeline: some View {
         VStack(spacing: 3) {
-            Slider(value: Binding(get: { dragging ? scrub : min(player.elapsed, max(1, player.duration)) }, set: { scrub = $0 }), in: 0...max(1, player.duration)) { editing in
-                if editing { scrub = player.elapsed; dragging = true } else { player.seek(scrub); dragging = false }
+            Slider(value: Binding(get: { dragging ? scrub : min(player.elapsed, max(1, player.duration)) }, set: { val in
+                if abs(val - scrub) > 2.0 {
+                    Haptic.selection()
+                }
+                scrub = val
+            }), in: 0...max(1, player.duration)) { editing in
+                if editing {
+                    scrub = player.elapsed
+                    dragging = true
+                    Haptic.medium()
+                } else {
+                    player.seek(scrub)
+                    dragging = false
+                    Haptic.light()
+                }
             }.tint(.white)
-            HStack { Text((dragging ? scrub : player.elapsed).clockTime); Spacer(); Text(player.duration.clockTime) }.font(.system(size: 10, design: .monospaced)).foregroundStyle(.white.opacity(0.45))
+            HStack {
+                Text((dragging ? scrub : player.elapsed).clockTime)
+                Spacer()
+                Text(player.duration.clockTime)
+            }
+            .font(.system(size: 10, design: .monospaced))
+            .foregroundStyle(.white.opacity(0.45))
         }.frame(maxWidth: .infinity)
     }
 
@@ -425,8 +518,8 @@ struct PlayerView: View {
 
             Button {
                 if !player.isBuffering {
+                    Haptic.medium()
                     player.toggle()
-                    library.haptic()
                 }
             } label: {
                 ZStack {
