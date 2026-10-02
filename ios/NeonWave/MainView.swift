@@ -232,13 +232,20 @@ struct HomeView: View {
         }
     }
 
+    private var headerTitle: String {
+        if let username = session.account?.username, !username.isEmpty {
+            return "Écouter \(username)"
+        }
+        return "Écouter"
+    }
+
     private var welcomeHeader: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(greeting.uppercased())
                 .font(.system(size: 11, weight: .bold))
                 .tracking(1.4)
                 .foregroundStyle(Color(white: 0.55))
-            Text(session.account?.username.map { "Écouter \($0)" } ?? "Écouter")
+            Text(headerTitle)
                 .font(.system(size: 32, weight: .bold))
                 .tracking(-0.8)
                 .foregroundStyle(.white)
