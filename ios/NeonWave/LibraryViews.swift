@@ -355,7 +355,7 @@ struct LibraryView: View {
                     NavigationLink {
                         TrackCollectionView(title: "Titres aimés", kind: .liked)
                     } label: {
-                        categoryRow("Titres aimés", count: library.liked.count, symbol: "heart.fill", tint: .pink)
+                        categoryRow("Titres aimés", count: library.liked.count, symbol: "heart.fill", tint: NW.accent)
                     }
 
                     categoryDivider
@@ -1506,7 +1506,7 @@ struct ArtistDetailView: View {
                     } label: {
                         Image(systemName: isFollowed ? "heart.fill" : "heart")
                             .font(.system(size: 16, weight: .bold))
-                            .foregroundStyle(isFollowed ? .pink : .white)
+                            .foregroundStyle(isFollowed ? NW.accent : .white)
                             .padding(8)
                             .background(.white.opacity(0.12), in: Circle())
                     }

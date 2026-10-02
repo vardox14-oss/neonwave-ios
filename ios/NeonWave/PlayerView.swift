@@ -90,6 +90,96 @@ struct MiniPlayer: View {
     }
 }
 
+// MARK: - Image Color Extraction
+extension UIImage {
+    var averageColor: Color? {
+        guard let cg = self.cgImage else {
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            let renderer = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1), format: format)
+            let img = renderer.image { _ in
+                self.draw(in: CGRect(x: 0, y: 0, width: 1, height: 1))
+            }
+            guard let fallbackCg = img.cgImage else { return nil }
+            return extractColor(from: fallbackCg)
+        }
+        return extractColor(from: cg)
+    }
+
+    private func extractColor(from cg: CGImage) -> Color? {
+        var rawData = [UInt8](repeating: 0, count: 4)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let context = CGContext(
+            data: &rawData,
+            width: 1,
+            height: 1,
+            bitsPerComponent: 8,
+            bytesPerRow: 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        ) else { return nil }
+        context.draw(cg, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+
+        let r = Double(rawData[0]) / 255.0
+        let g = Double(rawData[1]) / 255.0
+        let b = Double(rawData[2]) / 255.0
+        return Color(red: r, green: g, blue: b)
+    }
+}
+
+// MARK: - Lyric Line Computation
+struct LyricLineState {
+    let isActive: Bool
+    let isSung: Bool
+    let progress: Double
+    let duration: Double
+    let distance: Int
+}
+
+func computeLyricLineState(lyrics: [LyricLine], index: Int, line: LyricLine, currentPos: Double, activeLeadIndex: Int) -> LyricLineState {
+    let lineStartTime = line.time
+    let lineEndTime: Double
+    if let existing = line.endTime {
+        lineEndTime = max(lineStartTime + 0.5, existing)
+    } else if index + 1 < lyrics.count {
+        let nextTime = lyrics[(index + 1)...].first(where: { !$0.isBackground })?.time ?? (lineStartTime + 4.5)
+        lineEndTime = max(lineStartTime + 0.5, nextTime)
+    } else {
+        lineEndTime = lineStartTime + 4.5
+    }
+    let lineDuration = max(0.5, lineEndTime - lineStartTime)
+
+    let isActive: Bool
+    let isSung: Bool
+    if line.isBackground {
+        isActive = (currentPos >= lineStartTime && currentPos < lineEndTime)
+        isSung = (currentPos >= lineEndTime)
+    } else {
+        if index == activeLeadIndex {
+            isActive = (currentPos >= lineStartTime && currentPos < lineEndTime)
+            isSung = (currentPos >= lineEndTime)
+        } else if index < activeLeadIndex {
+            isActive = false
+            isSung = true
+        } else {
+            isActive = (currentPos >= lineStartTime && currentPos < lineEndTime)
+            isSung = false
+        }
+    }
+
+    let distance = isActive ? 0 : abs(index - activeLeadIndex)
+    let elapsedInLine = max(0, currentPos - lineStartTime)
+    let progress = max(0, min(1.0, elapsedInLine / lineDuration))
+
+    return LyricLineState(
+        isActive: isActive,
+        isSung: isSung,
+        progress: progress,
+        duration: lineDuration,
+        distance: distance
+    )
+}
+
 struct PlayerView: View {
     var onClose: (() -> Void)? = nil
     @EnvironmentObject private var player: AudioPlayer
@@ -106,6 +196,7 @@ struct PlayerView: View {
     @State private var selectedArtist: ArtistIdentifier? = nil
     @State private var showArtworkOverlay = false
     @State private var localArtImage: UIImage? = nil
+    @State private var artworkDominantColor: Color? = nil
 
     var body: some View {
         GeometryReader { geo in
@@ -215,12 +306,29 @@ struct PlayerView: View {
                 canvasURL = nil
                 showArtworkOverlay = false
                 localArtImage = nil
+                artworkDominantColor = nil
                 return
             }
-            if let local = library.artworkURL(track) {
-                localArtImage = UIImage(contentsOfFile: local.path)
+            if let local = library.artworkURL(track), let img = UIImage(contentsOfFile: local.path) {
+                localArtImage = img
+                artworkDominantColor = img.averageColor
             } else {
                 localArtImage = nil
+                artworkDominantColor = nil
+                if let remoteStr = track.artworkURL, let url = URL(string: remoteStr) {
+                    Task.detached(priority: .utility) {
+                        if let (data, _) = try? await URLSession.shared.data(from: url),
+                           let img = UIImage(data: data) {
+                            let avg = img.averageColor
+                            await MainActor.run {
+                                withAnimation(.easeInOut(duration: 0.5)) {
+                                    artworkDominantColor = avg
+                                    localArtImage = img
+                                }
+                            }
+                        }
+                    }
+                }
             }
             if let localCanvas = library.canvasURL(track) {
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.5)) {
@@ -241,6 +349,13 @@ struct PlayerView: View {
 
     @ViewBuilder private func immersiveBackground(size: CGSize) -> some View {
         if let track = player.current {
+            let dynamicColors: [Color] = {
+                if let dominant = artworkDominantColor {
+                    return [dominant, dominant.opacity(0.35)]
+                }
+                return NW.colors[track.colorIndex]
+            }()
+
             ZStack {
                 NW.background
 
@@ -253,7 +368,7 @@ struct PlayerView: View {
                             .frame(width: size.width, height: size.height)
                             .scaleEffect(1.40)
                             .blur(radius: 60)
-                            .opacity(0.65)
+                            .opacity(0.70)
                             .clipped()
                     } else {
                         AsyncImage(url: track.artworkURL.flatMap(URL.init(string:))) { phase in
@@ -265,7 +380,7 @@ struct PlayerView: View {
                                     .frame(width: size.width, height: size.height)
                                     .scaleEffect(1.40)
                                     .blur(radius: 60)
-                                    .opacity(0.65)
+                                    .opacity(0.70)
                                     .clipped()
                             default:
                                 Color.clear
@@ -276,8 +391,8 @@ struct PlayerView: View {
                     }
                 }
 
-                // 2. Mesh gradient liquide animé fluide
-                FluidMeshBackground(colors: NW.colors[track.colorIndex], isPlaying: player.isPlaying, reduceMotion: reduceMotion)
+                // 2. Mesh gradient liquide animé fluide adapté aux couleurs de la pochette
+                FluidMeshBackground(colors: dynamicColors, isPlaying: player.isPlaying, reduceMotion: reduceMotion)
                     .opacity(0.85)
 
                 // 3. Vidéo Canvas si présente
@@ -539,7 +654,7 @@ struct PlayerView: View {
                 let isLiked = library.snapshot.likedIDs.contains(track.id)
                 Image(systemName: isLiked ? "heart.fill" : "heart")
                     .font(.system(size: 22, weight: .medium))
-                    .foregroundStyle(isLiked ? Color.pink : .white.opacity(0.70))
+                    .foregroundStyle(isLiked ? NW.accent : .white.opacity(0.70))
                     .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
@@ -720,7 +835,9 @@ struct PlayerView: View {
 
     // MARK: - Spotify-Style Lyrics Preview Card
     private func lyricsPreviewCard(_ track: Track) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        let cardAccent = artworkDominantColor ?? NW.colors[track.colorIndex][0]
+
+        return VStack(alignment: .leading, spacing: 14) {
             // Header: Title + Action Buttons (matching Spotify screenshot)
             HStack {
                 Text("Lyrics")
@@ -772,7 +889,7 @@ struct PlayerView: View {
                 }
             }
 
-            // Aperçu dynamique synchronisé des paroles
+            // Aperçu dynamique synchronisé des paroles AVEC ANIMATIONS SPICY LYRICS EN TEMPS RÉEL
             if player.loadingLyrics {
                 HStack(spacing: 10) {
                     ProgressView().tint(.white).scaleEffect(0.9)
@@ -785,27 +902,33 @@ struct PlayerView: View {
             } else if !player.lyrics.isEmpty {
                 let activeIdx = player.activeLyricIndex ?? 0
                 let startIdx = max(0, activeIdx)
-                let endIdx = min(player.lyrics.count, startIdx + 4)
-                let previewSlice = Array(player.lyrics[startIdx..<endIdx])
+                let endIdx = min(player.lyrics.count, startIdx + 3)
+                let previewIndices = Array(startIdx..<endIdx)
 
-                VStack(alignment: .leading, spacing: 9) {
-                    ForEach(Array(previewSlice.enumerated()), id: \.element.id) { offset, line in
-                        let isCurrent = (startIdx + offset == activeIdx)
-                        let text = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !text.isEmpty {
-                            Text(text)
-                                .font(.system(size: isCurrent ? 23 : 20, weight: isCurrent ? .heavy : .semibold, design: .rounded))
-                                .foregroundStyle(isCurrent ? Color.white : Color.white.opacity(0.48))
-                                .lineLimit(2)
-                                .multilineTextAlignment(.leading)
-                                .shadow(color: isCurrent ? Color.white.opacity(0.35) : Color.clear, radius: 8)
-                        }
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(previewIndices, id: \.self) { idx in
+                        let line = player.lyrics[idx]
+                        let state = computeLyricLineState(
+                            lyrics: player.lyrics,
+                            index: idx,
+                            line: line,
+                            currentPos: max(0, player.elapsed - player.lyricsOffset),
+                            activeLeadIndex: activeIdx
+                        )
+                        SpicyLyricLine(
+                            line: line,
+                            distance: 0,
+                            isActive: state.isActive,
+                            isSung: state.isSung,
+                            progress: state.progress,
+                            duration: state.duration,
+                            isWaveEffect: player.isWaveEffect,
+                            isPlaying: player.isPlaying && !player.isBuffering
+                        )
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 2)
-                .padding(.bottom, 6)
-                .animation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.75), value: activeIdx)
+                .animation(reduceMotion ? nil : .spring(response: 0.40, dampingFraction: 0.80), value: activeIdx)
             } else if let plain = player.plainLyrics, !plain.isEmpty {
                 let lines = plain.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
                 VStack(alignment: .leading, spacing: 8) {
@@ -839,8 +962,9 @@ struct PlayerView: View {
                     .fill(
                         LinearGradient(
                             colors: [
-                                NW.colors[track.colorIndex][0].opacity(0.38),
-                                Color.black.opacity(0.60)
+                                cardAccent.opacity(0.60),
+                                cardAccent.opacity(0.25),
+                                Color.black.opacity(0.75)
                             ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
@@ -850,9 +974,9 @@ struct PlayerView: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(Color.white.opacity(0.14), lineWidth: 1)
+                .stroke(cardAccent.opacity(0.35), lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.35), radius: 18, y: 6)
+        .shadow(color: cardAccent.opacity(0.30), radius: 22, y: 8)
         .contentShape(Rectangle())
         .onTapGesture {
             Haptic.light()
@@ -1016,7 +1140,7 @@ struct LyricsView: View {
                         } else if !player.lyrics.isEmpty {
                             Color.clear.frame(height: 110)
                             ForEach(Array(player.lyrics.enumerated()), id: \.element.id) { index, line in
-                                let state = lineState(for: index, line: line, currentPos: max(0, player.elapsed - player.lyricsOffset), activeLeadIndex: player.activeLyricIndex ?? -1)
+                                let state = computeLyricLineState(lyrics: player.lyrics, index: index, line: line, currentPos: max(0, player.elapsed - player.lyricsOffset), activeLeadIndex: player.activeLyricIndex ?? -1)
                                 let isDot = (line.text == "•••" || line.text == "..." || line.text == "♪")
 
                                 if !isDot || state.isActive {
@@ -1121,58 +1245,6 @@ struct LyricsView: View {
             }
         }
     }
-
-    private func lineState(for index: Int, line: LyricLine, currentPos: Double, activeLeadIndex: Int) -> LyricLineState {
-        let lineStartTime = line.time
-        let lineEndTime: Double
-        if let existing = line.endTime {
-            lineEndTime = max(lineStartTime + 0.5, existing)
-        } else if index + 1 < player.lyrics.count {
-            let nextTime = player.lyrics[(index + 1)...].first(where: { !$0.isBackground })?.time ?? (lineStartTime + 4.5)
-            lineEndTime = max(lineStartTime + 0.5, nextTime)
-        } else {
-            lineEndTime = lineStartTime + 4.5
-        }
-        let lineDuration = max(0.5, lineEndTime - lineStartTime)
-
-        let isActive: Bool
-        let isSung: Bool
-        if line.isBackground {
-            isActive = (currentPos >= lineStartTime && currentPos < lineEndTime)
-            isSung = (currentPos >= lineEndTime)
-        } else {
-            if index == activeLeadIndex {
-                isActive = (currentPos >= lineStartTime && currentPos < lineEndTime)
-                isSung = (currentPos >= lineEndTime)
-            } else if index < activeLeadIndex {
-                isActive = false
-                isSung = true
-            } else {
-                isActive = (currentPos >= lineStartTime && currentPos < lineEndTime)
-                isSung = false
-            }
-        }
-
-        let distance = isActive ? 0 : abs(index - activeLeadIndex)
-        let elapsedInLine = max(0, currentPos - lineStartTime)
-        let progress = max(0, min(1.0, elapsedInLine / lineDuration))
-
-        return LyricLineState(
-            isActive: isActive,
-            isSung: isSung,
-            progress: progress,
-            duration: lineDuration,
-            distance: distance
-        )
-    }
-}
-
-private struct LyricLineState {
-    let isActive: Bool
-    let isSung: Bool
-    let progress: Double
-    let duration: Double
-    let distance: Int
 }
 
 // Lightweight static word for lines that are not currently active.

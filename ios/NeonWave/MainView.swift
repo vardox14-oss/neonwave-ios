@@ -256,7 +256,7 @@ struct HomeView: View {
     private var quickActions: some View {
         HStack(spacing: 10) {
             NavigationLink { TrackCollectionView(title: "Titres aimés", kind: .liked) } label: {
-                HomeShortcut(title: "Favoris", value: "\(library.liked.count) titres", symbol: "heart.fill", tint: .pink)
+                HomeShortcut(title: "Favoris", value: "\(library.liked.count) titres", symbol: "heart.fill", tint: NW.accent)
             }
             NavigationLink { TrackCollectionView(title: "Sur cet iPhone", kind: .downloaded) } label: {
                 HomeShortcut(title: "Hors ligne", value: "\(library.downloaded.count) titres", symbol: "arrow.down.circle.fill", tint: NW.accent)
@@ -544,9 +544,9 @@ struct OfflineModeView: View {
                                 }
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 5)
-                                .background(filterFavoritesOnly ? Color.pink.opacity(0.2) : NW.surface, in: Capsule())
-                                .overlay(Capsule().stroke(filterFavoritesOnly ? Color.pink.opacity(0.5) : .white.opacity(0.08)))
-                                .foregroundStyle(filterFavoritesOnly ? Color.pink : NW.muted)
+                                .background(filterFavoritesOnly ? NW.accent.opacity(0.2) : NW.surface, in: Capsule())
+                                .overlay(Capsule().stroke(filterFavoritesOnly ? NW.accent.opacity(0.5) : .white.opacity(0.08)))
+                                .foregroundStyle(filterFavoritesOnly ? NW.accent : NW.muted)
                             }
                         }
                     }

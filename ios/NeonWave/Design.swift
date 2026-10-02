@@ -4,10 +4,10 @@ enum NW {
     static let background = Color(red: 0.035, green: 0.035, blue: 0.045)
     static let surface = Color(white: 0.10)
     static let elevated = Color(white: 0.16)
-    static let blue = Color(red: 0.20, green: 0.48, blue: 1.0)
+    static let blue = Color(red: 0.12, green: 0.52, blue: 1.0)
     static let cyan = Color(red: 0.20, green: 0.83, blue: 0.91)
     static let violet = Color(red: 0.58, green: 0.35, blue: 1.0)
-    static let accent = Color(red: 0.98, green: 0.22, blue: 0.35) // Apple Music signature coral/red
+    static let accent = Color(red: 0.12, green: 0.52, blue: 1.0) // Vibrant Electric Blue
     static let muted = Color(white: 0.56)
     static let colors: [[Color]] = [
         [.init(red: 0.27, green: 0.40, blue: 1), .init(red: 0.08, green: 0.10, blue: 0.34)],
