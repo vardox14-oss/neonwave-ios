@@ -145,12 +145,12 @@ private struct ProfileButton: View {
     var body: some View {
         Button(action: action) {
             ZStack {
-                Circle().fill(LinearGradient(colors: [NW.blue, NW.violet], startPoint: .topLeading, endPoint: .bottomTrailing))
-                Text(String(name.prefix(1)).uppercased()).font(.caption.bold()).foregroundStyle(.white)
+                Circle().fill(Color.white.opacity(0.12))
+                Image(systemName: "person.crop.circle")
+                    .font(.system(size: 21, weight: .medium))
+                    .foregroundStyle(.white)
             }
-            .frame(width: 36, height: 36)
-            .overlay(Circle().stroke(.white.opacity(0.25)))
-            .shadow(color: NW.blue.opacity(0.28), radius: 10)
+            .frame(width: 34, height: 34)
         }.accessibilityLabel("Mon profil et réglages")
     }
 }
@@ -161,29 +161,32 @@ private struct PremiumTabBar: View {
     @Binding var selection: LibraryTab
 
     var body: some View {
-        HStack(spacing: 3) {
+        HStack(spacing: 0) {
             ForEach(LibraryTab.allCases, id: \.self) { item in
                 Button {
-                    withAnimation(reduceMotion ? nil : .spring(response: 0.36, dampingFraction: 0.82)) { selection = item }
+                    withAnimation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.85)) { selection = item }
                     library.haptic()
                 } label: {
-                    VStack(spacing: 5) {
-                        Image(systemName: item.symbol).font(.system(size: 18, weight: selection == item ? .semibold : .regular))
-                        Text(item.rawValue).font(.system(size: 9, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.72)
+                    VStack(spacing: 4) {
+                        Image(systemName: item.symbol)
+                            .font(.system(size: 20, weight: selection == item ? .semibold : .regular))
+                        Text(item.rawValue)
+                            .font(.system(size: 10, weight: selection == item ? .semibold : .medium))
+                            .lineLimit(1)
                     }
-                    .foregroundStyle(selection == item ? .white : NW.muted)
-                    .frame(maxWidth: .infinity).frame(height: 55)
-                    .background(selection == item ? NW.blue.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
-                    .overlay(alignment: .top) {
-                        if selection == item { Capsule().fill(NW.cyan).frame(width: 19, height: 2).offset(y: 3) }
-                    }
-                }.buttonStyle(PressStyle()).accessibilityAddTraits(selection == item ? .isSelected : [])
+                    .foregroundStyle(selection == item ? NW.accent : Color(white: 0.55))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selection == item ? .isSelected : [])
             }
         }
-        .padding(5)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 25, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 25).stroke(.white.opacity(0.10)))
-        .shadow(color: .black.opacity(0.35), radius: 24, y: 12)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(.white.opacity(0.12), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.35), radius: 20, y: 10)
     }
 }
 
@@ -230,31 +233,29 @@ struct HomeView: View {
     }
 
     private var welcomeHeader: some View {
-        HStack(alignment: .bottom) {
-            VStack(alignment: .leading, spacing: 7) {
-                Text("\(greeting)\(session.account.map { ", \($0.username)" } ?? "")")
-                    .font(.subheadline.weight(.medium)).foregroundStyle(NW.muted)
-                Text("À vous le son.")
-                    .font(.system(size: 40, weight: .bold, design: .rounded)).tracking(-1.6)
-            }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 5) {
-                Text("\(library.tracks.count)").font(.system(size: 24, weight: .bold, design: .rounded))
-                Text("TITRES").font(.system(size: 8, weight: .bold)).tracking(1.5).foregroundStyle(NW.muted)
-            }
+        VStack(alignment: .leading, spacing: 3) {
+            Text(greeting.uppercased())
+                .font(.system(size: 11, weight: .bold))
+                .tracking(1.4)
+                .foregroundStyle(Color(white: 0.55))
+            Text(session.account?.username.map { "Écouter \($0)" } ?? "Écouter")
+                .font(.system(size: 32, weight: .bold))
+                .tracking(-0.8)
+                .foregroundStyle(.white)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var quickActions: some View {
-        HStack(spacing: 11) {
+        HStack(spacing: 10) {
             NavigationLink { TrackCollectionView(title: "Titres aimés", kind: .liked) } label: {
-                HomeShortcut(title: "Favoris", value: "\(library.liked.count)", symbol: "heart.fill", tint: .pink)
+                HomeShortcut(title: "Favoris", value: "\(library.liked.count) titres", symbol: "heart.fill", tint: .pink)
             }
             NavigationLink { TrackCollectionView(title: "Sur cet iPhone", kind: .downloaded) } label: {
-                HomeShortcut(title: "Hors ligne", value: "\(library.downloaded.count)", symbol: "arrow.down.circle.fill", tint: NW.cyan)
+                HomeShortcut(title: "Hors ligne", value: "\(library.downloaded.count) titres", symbol: "arrow.down.circle.fill", tint: NW.accent)
             }
             Button(action: importFiles) {
-                HomeShortcut(title: "Importer", value: "Fichiers", symbol: "folder.badge.plus", tint: NW.blue)
+                HomeShortcut(title: "Importer", value: "Fichiers audio", symbol: "folder.badge.plus", tint: Color(white: 0.85))
             }
         }.buttonStyle(PressStyle())
     }
@@ -300,14 +301,14 @@ struct HomeView: View {
     @ViewBuilder private var collectionSection: some View {
         if library.tracks.isEmpty {
             VStack(alignment: .leading, spacing: 17) {
-                Label("VOTRE PREMIER TITRE", systemImage: "sparkles").font(.system(size: 9, weight: .bold)).tracking(1.6).foregroundStyle(NW.cyan)
-                Text("Votre collection commence ici.").font(.system(size: 25, weight: .bold, design: .rounded)).tracking(-0.7)
+                Label("VOTRE PREMIER TITRE", systemImage: "sparkles").font(.system(size: 9, weight: .bold)).tracking(1.6).foregroundStyle(NW.accent)
+                Text("Votre collection commence ici.").font(.system(size: 24, weight: .bold)).tracking(-0.5)
                 Text("Importez vos MP3, M4A ou FLAC. Ils restent accessibles sur cet iPhone, même sans connexion.")
                     .font(.subheadline).foregroundStyle(NW.muted).lineSpacing(4)
                 Button(action: importFiles) {
                     Label("Choisir mes fichiers", systemImage: "folder.badge.plus").font(.subheadline.bold()).padding(.horizontal, 17).padding(.vertical, 13).background(.white, in: Capsule()).foregroundStyle(.black)
                 }.buttonStyle(PressStyle())
-            }.padding(22).premiumPanel(radius: 26)
+            }.padding(22).premiumPanel(radius: 24)
         } else {
             VStack(alignment: .leading, spacing: 15) {
                 SectionHeading(title: "Derniers ajouts", eyebrow: "VOTRE COLLECTION")
@@ -319,14 +320,14 @@ struct HomeView: View {
     }
 
     private var listeningPromise: some View {
-        HStack(spacing: 14) {
-            Image(systemName: "headphones.circle.fill").font(.system(size: 34)).foregroundStyle(NW.blue)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Votre écoute reste la vôtre.").font(.subheadline.bold())
-                Text("Sans publicité. Avec vos choix.").font(.caption).foregroundStyle(NW.muted)
-            }
-            Spacer(); WaveMark(size: 28).opacity(0.75)
-        }.padding(17).premiumPanel(radius: 21)
+        HStack {
+            Spacer()
+            Text("NeonWave • Écoute sans publicité & haute fidélité")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Color(white: 0.40))
+            Spacer()
+        }
+        .padding(.vertical, 8)
     }
 }
 
@@ -337,35 +338,69 @@ private struct HomeMixHero: View {
 
     var body: some View {
         ZStack(alignment: .leading) {
-            LinearGradient(colors: [NW.blue, NW.violet.opacity(0.88), Color(red: 0.035, green: 0.06, blue: 0.17)], startPoint: .topLeading, endPoint: .bottomTrailing)
-            GeometryReader { geo in
-                Circle().stroke(.white.opacity(0.10), lineWidth: 40).frame(width: 240, height: 240).offset(x: geo.size.width - 150, y: 12)
-                Circle().stroke(.white.opacity(0.20), lineWidth: 1).frame(width: 172, height: 172).offset(x: geo.size.width - 115, y: 46)
-                WaveMark(size: 82).opacity(0.28).rotationEffect(.degrees(-11)).offset(x: geo.size.width - 105, y: 90)
-            }.clipped().accessibilityHidden(true)
+            LinearGradient(
+                colors: [
+                    Color(red: 0.12, green: 0.08, blue: 0.18),
+                    Color(red: 0.06, green: 0.06, blue: 0.09)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
 
-            VStack(alignment: .leading, spacing: 18) {
-                HStack(spacing: 7) {
+            Circle()
+                .fill(NW.accent.opacity(0.18))
+                .frame(width: 220, height: 220)
+                .blur(radius: 50)
+                .offset(x: 140, y: -40)
+
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 6) {
                     Circle().fill(Color.green).frame(width: 6, height: 6)
-                    Text("MIX NEONWAVE").font(.system(size: 9, weight: .bold)).tracking(1.8)
+                    Text("STATION PERSONNELLE")
+                        .font(.system(size: 10, weight: .bold))
+                        .tracking(1.4)
+                        .foregroundStyle(Color(white: 0.70))
                 }
-                Text("Entrez dans\nvotre bulle.").font(.system(size: 32, weight: .bold, design: .rounded)).tracking(-1)
-                Text(library.downloaded.isEmpty ? "Ajoutez vos titres et créez votre univers." : "Une sélection construite autour de vos écoutes.")
-                    .font(.caption).foregroundStyle(.white.opacity(0.72)).frame(maxWidth: 225, alignment: .leading)
+
+                Text("Votre Mix")
+                    .font(.system(size: 28, weight: .bold))
+                    .tracking(-0.6)
+                    .foregroundStyle(.white)
+
+                Text(library.downloaded.isEmpty ? "Ajoutez vos morceaux favoris pour démarrer une lecture continue." : "Une sélection construite autour de vos écoutes et artistes préférés.")
+                    .font(.subheadline)
+                    .foregroundStyle(Color(white: 0.65))
+                    .frame(maxWidth: 240, alignment: .leading)
+                    .lineSpacing(2)
+
                 Button {
                     if let first = library.downloaded.randomElement() {
-                        player.shuffle = true; player.play(first, in: library.downloaded)
-                    } else { importFiles() }
+                        player.shuffle = true
+                        player.play(first, in: library.downloaded)
+                    } else {
+                        importFiles()
+                    }
                 } label: {
-                    Label(library.downloaded.isEmpty ? "Ajouter ma musique" : "Lancer le mix", systemImage: library.downloaded.isEmpty ? "plus" : "play.fill")
-                        .font(.caption.bold()).padding(.horizontal, 18).padding(.vertical, 13).background(.white, in: Capsule()).foregroundStyle(.black)
-                }.buttonStyle(PressStyle())
-            }.padding(24)
+                    HStack(spacing: 8) {
+                        Image(systemName: library.downloaded.isEmpty ? "plus" : "play.fill")
+                            .font(.system(size: 13, weight: .bold))
+                        Text(library.downloaded.isEmpty ? "Ajouter de la musique" : "Lancer la station")
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(Color.white, in: Capsule())
+                    .foregroundStyle(.black)
+                }
+                .buttonStyle(PressStyle())
+                .padding(.top, 4)
+            }
+            .padding(24)
         }
-        .frame(minHeight: 278)
-        .clipShape(RoundedRectangle(cornerRadius: 31, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 31).stroke(.white.opacity(0.15)))
-        .shadow(color: NW.blue.opacity(0.24), radius: 30, y: 16)
+        .frame(minHeight: 230)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(.white.opacity(0.10), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.35), radius: 20, y: 10)
     }
 }
 
@@ -375,13 +410,24 @@ private struct HomeShortcut: View {
     let symbol: String
     let tint: Color
     var body: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            Image(systemName: symbol).font(.system(size: 18, weight: .semibold)).foregroundStyle(tint)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.system(size: 11, weight: .bold)).foregroundStyle(.white).lineLimit(1)
-                Text(value).font(.system(size: 9, weight: .medium)).foregroundStyle(NW.muted).lineLimit(1)
+        VStack(alignment: .leading, spacing: 10) {
+            Image(systemName: symbol)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(tint)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                Text(value)
+                    .font(.system(size: 11, weight: .regular))
+                    .foregroundStyle(Color(white: 0.55))
+                    .lineLimit(1)
             }
-        }.frame(maxWidth: .infinity, alignment: .leading).padding(14).premiumPanel(radius: 19)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .premiumPanel(radius: 16)
     }
 }
 

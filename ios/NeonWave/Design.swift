@@ -1,13 +1,14 @@
 import SwiftUI
 
 enum NW {
-    static let background = Color(red: 0.018, green: 0.022, blue: 0.048)
-    static let surface = Color(red: 0.060, green: 0.068, blue: 0.105)
-    static let elevated = Color(red: 0.085, green: 0.095, blue: 0.145)
-    static let blue = Color(red: 0.38, green: 0.50, blue: 1)
+    static let background = Color(red: 0.035, green: 0.035, blue: 0.045)
+    static let surface = Color(white: 0.10)
+    static let elevated = Color(white: 0.16)
+    static let blue = Color(red: 0.20, green: 0.48, blue: 1.0)
     static let cyan = Color(red: 0.20, green: 0.83, blue: 0.91)
-    static let violet = Color(red: 0.58, green: 0.35, blue: 1)
-    static let muted = Color(red: 0.61, green: 0.64, blue: 0.73)
+    static let violet = Color(red: 0.58, green: 0.35, blue: 1.0)
+    static let accent = Color(red: 0.98, green: 0.22, blue: 0.35) // Apple Music signature coral/red
+    static let muted = Color(white: 0.56)
     static let colors: [[Color]] = [
         [.init(red: 0.27, green: 0.40, blue: 1), .init(red: 0.08, green: 0.10, blue: 0.34)],
         [.init(red: 0.94, green: 0.42, blue: 0.30), .init(red: 0.31, green: 0.08, blue: 0.19)],
@@ -19,22 +20,22 @@ enum NW {
 }
 
 struct PremiumBackdrop: View {
-    var accent: Color = NW.blue
+    var accent: Color = NW.accent
     var body: some View {
         ZStack {
             NW.background
-            RadialGradient(colors: [accent.opacity(0.24), .clear], center: .init(x: 0.88, y: 0.05), startRadius: 0, endRadius: 360)
-            RadialGradient(colors: [NW.cyan.opacity(0.12), .clear], center: .init(x: 0.05, y: 0.82), startRadius: 10, endRadius: 330)
-            LinearGradient(colors: [.clear, Color.black.opacity(0.22)], startPoint: .top, endPoint: .bottom)
+            RadialGradient(colors: [accent.opacity(0.12), .clear], center: .init(x: 0.88, y: 0.05), startRadius: 20, endRadius: 420)
+            RadialGradient(colors: [Color.purple.opacity(0.06), .clear], center: .init(x: 0.08, y: 0.85), startRadius: 20, endRadius: 360)
+            LinearGradient(colors: [.clear, Color.black.opacity(0.40)], startPoint: .top, endPoint: .bottom)
         }.ignoresSafeArea()
     }
 }
 
 extension View {
-    func premiumPanel(radius: CGFloat = 24) -> some View {
+    func premiumPanel(radius: CGFloat = 20) -> some View {
         self
-            .background(.white.opacity(0.065), in: RoundedRectangle(cornerRadius: radius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).stroke(.white.opacity(0.09), lineWidth: 1))
+            .background(.white.opacity(0.045), in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).stroke(.white.opacity(0.07), lineWidth: 0.5))
     }
 }
 
@@ -46,7 +47,7 @@ struct WaveMark: View {
             .renderingMode(.original)
             .scaledToFit()
             .frame(width: size, height: size)
-            .shadow(color: NW.blue.opacity(0.48), radius: size * 0.16)
+            .shadow(color: NW.blue.opacity(0.35), radius: size * 0.14)
             .accessibilityHidden(true)
     }
 }
@@ -57,7 +58,7 @@ struct CoverArt: View {
     var symbol: String? = nil
     var imageURL: URL? = nil
     var remoteURL: String? = nil
-    var radius: CGFloat = 20
+    var radius: CGFloat = 12
     var body: some View {
         GeometryReader { geo in
             ZStack {
@@ -80,21 +81,26 @@ struct CoverArt: View {
                     placeholder(geo: geo)
                 }
             }.frame(width: geo.size.width, height: geo.size.height).clipped()
-        }.aspectRatio(1, contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
-            .accessibilityHidden(true)
+        }
+        .aspectRatio(1, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).stroke(.white.opacity(0.07), lineWidth: 0.5))
+        .accessibilityHidden(true)
     }
 
     @ViewBuilder private func placeholder(geo: GeometryProxy) -> some View {
         let colors = NW.colors[(track?.colorIndex ?? index) % NW.colors.count]
-        LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
-        Circle().stroke(.white.opacity(0.12), lineWidth: geo.size.width * 0.13)
-            .frame(width: geo.size.width * 0.85).offset(x: geo.size.width * 0.18, y: geo.size.height * 0.16)
-        Circle().stroke(.white.opacity(0.16), lineWidth: 1)
-            .frame(width: geo.size.width * 0.64).offset(x: geo.size.width * 0.18, y: geo.size.height * 0.16)
-        if let symbol {
-            Image(systemName: symbol).font(.system(size: geo.size.width * 0.32, weight: .medium)).foregroundStyle(.white)
-        } else {
-            WaveMark(size: geo.size.width * 0.26).rotationEffect(.degrees(-12))
+        ZStack {
+            LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
+            if let symbol {
+                Image(systemName: symbol)
+                    .font(.system(size: geo.size.width * 0.36, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.85))
+            } else {
+                Image(systemName: "music.note")
+                    .font(.system(size: geo.size.width * 0.36, weight: .light))
+                    .foregroundStyle(.white.opacity(0.75))
+            }
         }
     }
 }
@@ -106,24 +112,28 @@ struct PrimaryButton: View {
     var action: () -> Void
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 10) {
-                if loading { ProgressView().tint(.white) }
-                else if let symbol { Image(systemName: symbol) }
-                Text(title).font(.system(.body, design: .rounded, weight: .bold))
-            }.frame(maxWidth: .infinity).frame(minHeight: 56)
-                .background(LinearGradient(colors: [NW.blue, NW.violet], startPoint: .leading, endPoint: .trailing), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(.white.opacity(0.18)))
-                .shadow(color: NW.blue.opacity(0.24), radius: 18, y: 9)
-        }.foregroundStyle(.white).buttonStyle(PressStyle()).disabled(loading)
+            HStack(spacing: 9) {
+                if loading { ProgressView().tint(.black) }
+                else if let symbol { Image(systemName: symbol).font(.system(size: 15, weight: .bold)) }
+                Text(title).font(.system(size: 16, weight: .semibold))
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 52)
+            .background(Color.white, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+            .shadow(color: .black.opacity(0.2), radius: 10, y: 5)
+        }
+        .foregroundStyle(.black)
+        .buttonStyle(PressStyle())
+        .disabled(loading)
     }
 }
 
 struct PressStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     func makeBody(configuration: ButtonStyleConfiguration) -> some View {
-        configuration.label.opacity(configuration.isPressed ? 0.8 : 1)
-            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
-            .animation(reduceMotion ? nil : .spring(response: 0.3), value: configuration.isPressed)
+        configuration.label.opacity(configuration.isPressed ? 0.72 : 1)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
+            .animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.8), value: configuration.isPressed)
     }
 }
 
@@ -131,10 +141,19 @@ struct SectionHeading: View {
     let title: String
     var eyebrow: String? = nil
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            if let eyebrow { Text(eyebrow.uppercased()).font(.system(size: 10, weight: .bold)).tracking(2.5).foregroundStyle(NW.muted) }
-            Text(title).font(.system(size: 25, weight: .bold, design: .rounded)).tracking(-0.7).foregroundStyle(.white)
-        }.frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: 3) {
+            if let eyebrow {
+                Text(eyebrow.uppercased())
+                    .font(.system(size: 11, weight: .bold))
+                    .tracking(1.2)
+                    .foregroundStyle(NW.muted)
+            }
+            Text(title)
+                .font(.system(size: 22, weight: .bold))
+                .tracking(-0.4)
+                .foregroundStyle(.white)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -146,12 +165,27 @@ struct EmptyLibrary: View {
     var action: (() -> Void)? = nil
     var body: some View {
         VStack(spacing: 16) {
-            Image(systemName: symbol).font(.system(size: 34, weight: .light)).foregroundStyle(NW.blue)
-                .frame(width: 86, height: 86).background(NW.blue.opacity(0.1), in: RoundedRectangle(cornerRadius: 28))
-            Text(title).font(.title3.bold())
-            Text(description).font(.subheadline).foregroundStyle(NW.muted).multilineTextAlignment(.center)
-            if let actionTitle, let action { Button(actionTitle, action: action).font(.subheadline.bold()).tint(NW.blue).padding(.top, 4) }
-        }.frame(maxWidth: .infinity).padding(.horizontal, 26).padding(.vertical, 36)
+            Image(systemName: symbol)
+                .font(.system(size: 36, weight: .light))
+                .foregroundStyle(NW.accent)
+                .frame(width: 80, height: 80)
+                .background(NW.accent.opacity(0.12), in: Circle())
+            Text(title).font(.title3.weight(.bold))
+            Text(description)
+                .font(.subheadline)
+                .foregroundStyle(NW.muted)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 10)
+            if let actionTitle, let action {
+                Button(actionTitle, action: action)
+                    .font(.subheadline.bold())
+                    .tint(NW.accent)
+                    .padding(.top, 4)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 26)
+        .padding(.vertical, 40)
     }
 }
 
@@ -164,9 +198,13 @@ struct IconButton: View {
             Haptic.light()
             action()
         }) {
-            Image(systemName: symbol).font(.system(size: 19, weight: .medium)).frame(width: 46, height: 46)
+            Image(systemName: symbol)
+                .font(.system(size: 19, weight: .medium))
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
         }
-        .buttonStyle(PressStyle()).accessibilityLabel(label)
+        .buttonStyle(PressStyle())
+        .accessibilityLabel(label)
     }
 }
 
@@ -196,40 +234,40 @@ struct FluidMeshBackground: View {
     var body: some View {
         TimelineView(.animation(minimumInterval: 1/24, paused: !isPlaying || reduceMotion)) { timeline in
             let time = timeline.date.timeIntervalSinceReferenceDate
-            let pulse = 1.0 + 0.08 * sin(time * 0.8)
+            let pulse = 1.0 + 0.06 * sin(time * 0.7)
 
             ZStack {
                 NW.background
 
                 // Top leading dynamic orb
                 Circle()
-                    .fill(colors[0].opacity(0.42))
-                    .frame(width: 340, height: 340)
-                    .blur(radius: 65)
-                    .offset(x: -60 + 55 * cos(time * 0.3), y: -130 + 45 * sin(time * 0.4))
+                    .fill(colors[0].opacity(0.38))
+                    .frame(width: 380, height: 380)
+                    .blur(radius: 75)
+                    .offset(x: -80 + 50 * cos(time * 0.25), y: -140 + 40 * sin(time * 0.35))
                     .scaleEffect(pulse)
 
                 // Top trailing accent orb
                 Circle()
-                    .fill((colors.count > 1 ? colors[1] : NW.cyan).opacity(0.35))
-                    .frame(width: 300, height: 300)
-                    .blur(radius: 70)
-                    .offset(x: 90 + 50 * sin(time * 0.35), y: -60 + 40 * cos(time * 0.25))
-                    .scaleEffect(1.9 - pulse)
+                    .fill((colors.count > 1 ? colors[1] : NW.accent).opacity(0.30))
+                    .frame(width: 340, height: 340)
+                    .blur(radius: 80)
+                    .offset(x: 100 + 45 * sin(time * 0.3), y: -50 + 35 * cos(time * 0.22))
+                    .scaleEffect(1.8 - pulse)
 
                 // Bottom center floating orb
                 Circle()
-                    .fill(NW.violet.opacity(0.28))
-                    .frame(width: 280, height: 280)
-                    .blur(radius: 60)
-                    .offset(x: 40 * sin(time * 0.5), y: 150 + 35 * cos(time * 0.4))
+                    .fill(Color.purple.opacity(0.22))
+                    .frame(width: 300, height: 300)
+                    .blur(radius: 70)
+                    .offset(x: 40 * sin(time * 0.4), y: 160 + 30 * cos(time * 0.35))
 
                 // Smooth darkening overlay for readability
                 LinearGradient(
                     colors: [
-                        Color.black.opacity(0.18),
-                        Color.black.opacity(0.35),
-                        NW.background.opacity(0.88)
+                        Color.black.opacity(0.20),
+                        Color.black.opacity(0.40),
+                        NW.background.opacity(0.92)
                     ],
                     startPoint: .top,
                     endPoint: .bottom
@@ -239,4 +277,3 @@ struct FluidMeshBackground: View {
         .ignoresSafeArea()
     }
 }
-

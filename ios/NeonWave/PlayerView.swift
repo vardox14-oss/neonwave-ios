@@ -14,27 +14,78 @@ struct MiniPlayer: View {
     let open: () -> Void
     var body: some View {
         if let track = player.current {
-            VStack(spacing: 0) {
-                HStack(spacing: 12) {
-                    Button(action: open) {
-                        HStack(spacing: 12) {
-                            CoverArt(track: track, imageURL: library.artworkURL(track), remoteURL: track.artworkURL, radius: 10).frame(width: 44, height: 44)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(track.title).font(.system(size: 13, weight: .bold)).lineLimit(1).foregroundStyle(.white)
-                                Text(player.isBuffering ? "Connexion au son…" : track.artist).font(.system(size: 11, weight: .medium)).foregroundStyle(player.isBuffering ? NW.blue : NW.muted).lineLimit(1)
-                            }.frame(maxWidth: .infinity, alignment: .leading)
-                        }.contentShape(Rectangle())
-                    }.buttonStyle(.plain)
-                    if player.isBuffering { ProgressView().tint(.white).frame(width: 46, height: 46) }
-                    else { IconButton(symbol: player.isPlaying ? "pause.fill" : "play.fill", label: player.isPlaying ? "Pause" : "Lecture") { player.toggle() } }
-                    IconButton(symbol: "forward.end.fill", label: "Titre suivant") { player.next() }
-                }.padding(.horizontal, 10).padding(.vertical, 8)
-                Rectangle()
-                    .fill(NW.blue.gradient)
-                    .scaleEffect(x: player.duration > 0 ? min(1, max(0, player.elapsed / player.duration)) : 0, y: 1.0, anchor: .leading)
-                    .frame(height: 2)
-                    .background(.white.opacity(0.08))
-            }.background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous)).clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            Button(action: open) {
+                VStack(spacing: 0) {
+                    HStack(spacing: 12) {
+                        CoverArt(track: track, imageURL: library.artworkURL(track), remoteURL: track.artworkURL, radius: 8)
+                            .frame(width: 42, height: 42)
+                            .shadow(color: .black.opacity(0.3), radius: 6, y: 2)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(track.title)
+                                .font(.system(size: 14, weight: .semibold))
+                                .lineLimit(1)
+                                .foregroundStyle(.white)
+                            Text(player.isBuffering ? "Connexion…" : track.artist)
+                                .font(.system(size: 12, weight: .regular))
+                                .foregroundStyle(player.isBuffering ? NW.accent : Color(white: 0.60))
+                                .lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                        HStack(spacing: 6) {
+                            if player.isBuffering {
+                                ProgressView().tint(.white).frame(width: 36, height: 36)
+                            } else {
+                                Button {
+                                    Haptic.light()
+                                    player.toggle()
+                                } label: {
+                                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                                        .font(.system(size: 20, weight: .semibold))
+                                        .foregroundStyle(.white)
+                                        .frame(width: 38, height: 38)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                            }
+
+                            Button {
+                                Haptic.light()
+                                player.next()
+                            } label: {
+                                Image(systemName: "forward.fill")
+                                    .font(.system(size: 17, weight: .semibold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 38, height: 38)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+
+                    // Integrated progress bar
+                    GeometryReader { geo in
+                        let progress = player.duration > 0 ? min(1.0, max(0.0, player.elapsed / player.duration)) : 0.0
+                        ZStack(alignment: .leading) {
+                            Rectangle()
+                                .fill(Color.white.opacity(0.10))
+                                .frame(width: geo.size.width, height: 1.5)
+                            Rectangle()
+                                .fill(Color.white)
+                                .frame(width: geo.size.width * CGFloat(progress), height: 1.5)
+                        }
+                    }
+                    .frame(height: 1.5)
+                }
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).stroke(.white.opacity(0.12), lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
+            }
+            .buttonStyle(.plain)
         }
     }
 }
@@ -58,37 +109,35 @@ struct PlayerView: View {
 
     var body: some View {
         GeometryReader { geo in
-            let topInset = max(56, geo.safeAreaInsets.top + 6)
+            let topInset = max(54, geo.safeAreaInsets.top + 4)
             ZStack {
                 immersiveBackground(size: geo.size)
                 if let track = player.current {
                     VStack(spacing: 0) {
                         header(track)
                             .padding(.top, topInset)
-                        modeSelector
-                            .padding(.top, 4)
 
-                        Spacer(minLength: 10)
+                        Spacer(minLength: 8)
 
                         content(track, size: geo.size)
 
-                        Spacer(minLength: 14)
+                        Spacer(minLength: 16)
 
                         trackInfo(track)
 
-                        Spacer(minLength: 10)
+                        Spacer(minLength: 14)
 
                         timeline
 
-                        Spacer(minLength: 12)
+                        Spacer(minLength: 16)
 
                         controls
 
-                        Spacer(minLength: 20)
+                        Spacer(minLength: 22)
 
                         footer(track)
                     }
-                    .padding(.horizontal, 24)
+                    .padding(.horizontal, 28)
                     .padding(.bottom, max(14, geo.safeAreaInsets.bottom + 6))
                     .frame(width: geo.size.width, height: geo.size.height)
                 }
@@ -195,16 +244,16 @@ struct PlayerView: View {
             ZStack {
                 NW.background
 
-                // 1. Fond vibrant basé sur la pochette (toujours présent en arrière-plan)
+                // 1. Fond vibrant basé sur la pochette
                 Group {
                     if let image = localArtImage {
                         Image(uiImage: image)
                             .resizable()
                             .scaledToFill()
                             .frame(width: size.width, height: size.height)
-                            .scaleEffect(1.35)
-                            .blur(radius: 54)
-                            .opacity(0.68)
+                            .scaleEffect(1.40)
+                            .blur(radius: 60)
+                            .opacity(0.65)
                             .clipped()
                     } else {
                         AsyncImage(url: track.artworkURL.flatMap(URL.init(string:))) { phase in
@@ -214,9 +263,9 @@ struct PlayerView: View {
                                     .resizable()
                                     .scaledToFill()
                                     .frame(width: size.width, height: size.height)
-                                    .scaleEffect(1.35)
-                                    .blur(radius: 54)
-                                    .opacity(0.68)
+                                    .scaleEffect(1.40)
+                                    .blur(radius: 60)
+                                    .opacity(0.65)
                                     .clipped()
                             default:
                                 Color.clear
@@ -231,7 +280,7 @@ struct PlayerView: View {
                 FluidMeshBackground(colors: NW.colors[track.colorIndex], isPlaying: player.isPlaying, reduceMotion: reduceMotion)
                     .opacity(0.85)
 
-                // 3. Vidéo Canvas par-dessus quand elle est prête (mise en pause en mode Paroles pour économiser le GPU)
+                // 3. Vidéo Canvas si présente
                 if let canvasURL = canvasURL {
                     LoopingCanvasVideo(url: canvasURL, isPlaying: player.isPlaying && mode == .cover)
                         .frame(width: size.width, height: size.height)
@@ -259,22 +308,28 @@ struct PlayerView: View {
 
     private func header(_ track: Track) -> some View {
         HStack {
-            glassIcon("chevron.down", label: "Réduire") {
+            Button {
+                Haptic.light()
                 onClose?()
                 dismiss()
-            }
-            Spacer()
-            VStack(spacing: 3) {
-                Text("À L’ÉCOUTE")
-                    .font(.system(size: 9, weight: .bold))
-                    .tracking(2.0)
+            } label: {
+                Image(systemName: "chevron.compact.down")
+                    .font(.system(size: 24, weight: .bold))
                     .foregroundStyle(.white.opacity(0.65))
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+
+            Spacer()
+
+            VStack(spacing: 2) {
                 Text(track.album ?? "NeonWave")
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.45))
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.70))
                     .lineLimit(1)
             }
             .frame(maxWidth: .infinity)
+
             if let until = player.sleepUntil {
                 Button {
                     Haptic.light()
@@ -288,9 +343,9 @@ struct PlayerView: View {
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(NW.blue.opacity(0.25), in: Capsule())
-                    .overlay(Capsule().stroke(NW.blue.opacity(0.55), lineWidth: 1))
-                    .foregroundStyle(NW.cyan)
+                    .background(.white.opacity(0.14), in: Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.22), lineWidth: 0.5))
+                    .foregroundStyle(.white)
                 }
                 .buttonStyle(.plain)
             } else if player.sleepAtEndOfTrack {
@@ -306,57 +361,31 @@ struct PlayerView: View {
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(NW.blue.opacity(0.25), in: Capsule())
-                    .overlay(Capsule().stroke(NW.blue.opacity(0.55), lineWidth: 1))
-                    .foregroundStyle(NW.cyan)
+                    .background(.white.opacity(0.14), in: Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.22), lineWidth: 0.5))
+                    .foregroundStyle(.white)
                 }
                 .buttonStyle(.plain)
             } else {
-                glassIcon("moon.zzz.fill", label: "Minuterie") {
+                Button {
                     Haptic.light()
                     showTimer = true
-                }
-                .foregroundStyle(.white.opacity(0.85))
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .frame(height: 48)
-    }
-
-    private var modeSelector: some View {
-        HStack(spacing: 4) {
-            ForEach(PlayerMode.allCases, id: \.self) { item in
-                Button {
-                    withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.86)) {
-                        mode = item
-                    }
                 } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: item.symbol)
-                            .font(.system(size: 11, weight: .semibold))
-                        Text(item.rawValue)
-                            .font(.system(size: 11, weight: .bold))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.75)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 9)
-                    .padding(.horizontal, 4)
-                    .background(mode == item ? .white.opacity(0.17) : .clear, in: Capsule())
-                    .foregroundStyle(mode == item ? .white : .white.opacity(0.48))
+                    Image(systemName: "moon.zzz")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.65))
+                        .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(4)
         .frame(maxWidth: .infinity)
-        .background(.black.opacity(0.22), in: Capsule())
-        .overlay(Capsule().stroke(.white.opacity(0.07)))
+        .frame(height: 44)
     }
 
     @ViewBuilder private func content(_ track: Track, size: CGSize) -> some View {
-        let maxW = size.width - 64
-        let dimension = min(maxW, min(290, max(180, size.height * 0.34)))
+        let maxW = size.width - 56
+        let dimension = min(maxW, min(330, max(220, size.height * 0.40)))
         switch mode {
         case .cover:
             if canvasURL != nil && !showArtworkOverlay {
@@ -390,12 +419,12 @@ struct PlayerView: View {
                     }
                 }
             } else {
-                CoverArt(track: track, imageURL: library.artworkURL(track), remoteURL: track.artworkURL, radius: 28)
+                CoverArt(track: track, imageURL: library.artworkURL(track), remoteURL: track.artworkURL, radius: 24)
                     .frame(width: dimension, height: dimension)
-                    .shadow(color: NW.colors[track.colorIndex][0].opacity(player.isPlaying ? 0.40 : 0.15), radius: player.isPlaying ? 35 : 18, y: player.isPlaying ? 20 : 10)
-                    .overlay(RoundedRectangle(cornerRadius: 28).stroke(.white.opacity(0.12)))
-                    .scaleEffect(player.isPlaying || reduceMotion ? 1.0 : 0.86)
-                    .animation(reduceMotion ? nil : .spring(response: 0.55, dampingFraction: 0.78), value: player.isPlaying)
+                    .shadow(color: NW.colors[track.colorIndex][0].opacity(player.isPlaying ? 0.45 : 0.15), radius: player.isPlaying ? 35 : 15, y: player.isPlaying ? 18 : 8)
+                    .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(.white.opacity(0.14), lineWidth: 0.5))
+                    .scaleEffect(player.isPlaying || reduceMotion ? 1.0 : 0.85)
+                    .animation(reduceMotion ? nil : .spring(response: 0.50, dampingFraction: 0.75), value: player.isPlaying)
                     .overlay(alignment: .topTrailing) {
                         if canvasURL != nil {
                             Button {
@@ -417,21 +446,32 @@ struct PlayerView: View {
             }
         case .lyrics:
             LyricsView(player: player)
-                .frame(maxWidth: .infinity, maxHeight: min(390, size.height * 0.44))
+                .frame(maxWidth: .infinity, maxHeight: min(440, size.height * 0.50))
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
         }
     }
 
     private func trackInfo(_ track: Track) -> some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(track.title).font(.system(size: 22, weight: .bold, design: .rounded)).tracking(-0.5).lineLimit(1)
+                Text(track.title)
+                    .font(.system(size: 22, weight: .bold))
+                    .tracking(-0.4)
+                    .lineLimit(1)
+                    .foregroundStyle(.white)
+
                 Button {
                     Haptic.light()
                     selectedArtist = ArtistIdentifier(name: track.artist, spotifyId: track.spotifyId)
                 } label: {
-                    HStack(spacing: 5) {
-                        Text(track.artist).font(.subheadline.weight(.medium)).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
-                        Image(systemName: "chevron.right").font(.system(size: 9, weight: .bold)).foregroundStyle(.white.opacity(0.35))
+                    HStack(spacing: 4) {
+                        Text(track.artist)
+                            .font(.system(size: 17, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.65))
+                            .lineLimit(1)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.35))
                     }
                 }
                 .buttonStyle(.plain)
@@ -439,18 +479,20 @@ struct PlayerView: View {
                 // Badge de qualité audio Pro
                 HStack(spacing: 6) {
                     Text(library.localURL(track) != nil ? "HORS-LIGNE" : "LOSSLESS")
-                        .font(.system(size: 8.5, weight: .heavy, design: .monospaced))
+                        .font(.system(size: 9, weight: .heavy, design: .monospaced))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2.5)
                         .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
                         .foregroundStyle(.white.opacity(0.85))
 
                     Text("AAC 256 KBPS • 48 KHZ")
-                        .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.40))
                 }
                 .padding(.top, 2)
-            }.frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
             if let progress = downloads.progress[track.id] {
                 Button { downloads.cancel(track.id) } label: {
                     ProgressView(value: progress).progressViewStyle(.circular).frame(width: 32)
@@ -458,62 +500,113 @@ struct PlayerView: View {
             } else if library.localURL(track) != nil {
                 Image(systemName: "arrow.down.circle.fill")
                     .font(.system(size: 22))
-                    .foregroundStyle(NW.blue)
+                    .foregroundStyle(Color.white.opacity(0.85))
             } else if track.canDownload {
-                glassIcon("arrow.down.circle", label: "Télécharger") {
+                Button {
                     Haptic.medium()
                     downloads.download(track)
+                } label: {
+                    Image(systemName: "arrow.down.circle")
+                        .font(.system(size: 22))
+                        .foregroundStyle(.white.opacity(0.70))
+                        .frame(width: 44, height: 44)
                 }
-                .foregroundStyle(NW.blue)
+                .buttonStyle(.plain)
             }
-            glassIcon(library.snapshot.likedIDs.contains(track.id) ? "heart.fill" : "heart", label: "Favori") {
+
+            Button {
                 Haptic.medium()
                 library.toggleLike(track)
+            } label: {
+                let isLiked = library.snapshot.likedIDs.contains(track.id)
+                Image(systemName: isLiked ? "heart.fill" : "heart")
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundStyle(isLiked ? Color.pink : .white.opacity(0.70))
+                    .frame(width: 44, height: 44)
             }
-            .foregroundStyle(library.snapshot.likedIDs.contains(track.id) ? Color.pink : .white)
-        }.frame(maxWidth: .infinity)
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private var timeline: some View {
-        VStack(spacing: 3) {
-            Slider(value: Binding(get: { dragging ? scrub : min(player.elapsed, max(1, player.duration)) }, set: { val in
-                if abs(val - scrub) > 2.0 {
-                    Haptic.selection()
+        VStack(spacing: 8) {
+            GeometryReader { geom in
+                let w = geom.size.width
+                let progress = player.duration > 0 ? (dragging ? scrub : player.elapsed) / player.duration : 0.0
+                let clamped = min(1.0, max(0.0, progress))
+                let barHeight: CGFloat = dragging ? 8 : 4
+
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.white.opacity(0.18))
+                        .frame(width: w, height: barHeight)
+
+                    Capsule()
+                        .fill(Color.white)
+                        .frame(width: w * CGFloat(clamped), height: barHeight)
                 }
-                scrub = val
-            }), in: 0...max(1, player.duration)) { editing in
-                if editing {
-                    scrub = player.elapsed
-                    dragging = true
-                    Haptic.medium()
-                } else {
-                    player.seek(scrub)
-                    dragging = false
-                    Haptic.light()
-                }
-            }.tint(.white)
+                .frame(height: 18)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { gesture in
+                            if !dragging {
+                                dragging = true
+                                scrub = player.elapsed
+                                Haptic.medium()
+                            }
+                            let newPercent = gesture.location.x / w
+                            let targetSec = min(max(0.0, Double(newPercent) * player.duration), player.duration)
+                            if abs(targetSec - scrub) > 2.0 {
+                                Haptic.selection()
+                            }
+                            scrub = targetSec
+                        }
+                        .onEnded { _ in
+                            player.seek(scrub)
+                            dragging = false
+                            Haptic.light()
+                        }
+                )
+                .animation(.spring(response: 0.25, dampingFraction: 0.8), value: dragging)
+            }
+            .frame(height: 18)
+
             HStack {
                 Text((dragging ? scrub : player.elapsed).clockTime)
                 Spacer()
-                Text(player.duration.clockTime)
+                Text("-\(max(0, player.duration - (dragging ? scrub : player.elapsed)).clockTime)")
             }
-            .font(.system(size: 10, design: .monospaced))
-            .foregroundStyle(.white.opacity(0.45))
-        }.frame(maxWidth: .infinity)
+            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            .foregroundStyle(.white.opacity(0.50))
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private var controls: some View {
         HStack(spacing: 0) {
-            IconButton(symbol: "shuffle", label: "Lecture aléatoire") {
+            Button {
                 player.shuffle.toggle()
                 library.haptic()
+            } label: {
+                Image(systemName: "shuffle")
+                    .font(.system(size: 19, weight: .semibold))
+                    .foregroundStyle(player.shuffle ? NW.accent : .white.opacity(0.45))
+                    .frame(width: 44, height: 44)
             }
-            .foregroundStyle(player.shuffle ? NW.blue : .white.opacity(0.5))
+            .buttonStyle(.plain)
             .frame(maxWidth: .infinity)
 
-            IconButton(symbol: "backward.end.fill", label: "Précédent") {
+            Button {
                 player.previous()
+            } label: {
+                Image(systemName: "backward.fill")
+                    .font(.system(size: 28, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 50, height: 50)
             }
+            .buttonStyle(PressStyle())
             .frame(maxWidth: .infinity)
 
             Button {
@@ -523,29 +616,42 @@ struct PlayerView: View {
                 }
             } label: {
                 ZStack {
-                    Circle().fill(.white).frame(width: 68, height: 68).shadow(color: .white.opacity(0.2), radius: 18)
                     if player.isBuffering {
-                        ProgressView().tint(.black)
+                        ProgressView().tint(.white).scaleEffect(1.3)
+                            .frame(width: 72, height: 72)
                     } else {
                         Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: 26, weight: .bold))
-                            .foregroundStyle(.black)
-                            .offset(x: player.isPlaying ? 0 : 2)
+                            .font(.system(size: 44, weight: .bold))
+                            .foregroundStyle(.white)
+                            .offset(x: player.isPlaying ? 0 : 3)
+                            .frame(width: 72, height: 72)
                     }
                 }
+                .contentShape(Rectangle())
             }
             .buttonStyle(PressStyle())
             .frame(maxWidth: .infinity)
 
-            IconButton(symbol: "forward.end.fill", label: "Suivant") {
+            Button {
                 player.next()
+            } label: {
+                Image(systemName: "forward.fill")
+                    .font(.system(size: 28, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 50, height: 50)
             }
+            .buttonStyle(PressStyle())
             .frame(maxWidth: .infinity)
 
-            IconButton(symbol: player.repeatMode == .one ? "repeat.1" : "repeat", label: "Répétition") {
+            Button {
                 player.cycleRepeat()
+            } label: {
+                Image(systemName: player.repeatMode == .one ? "repeat.1" : "repeat")
+                    .font(.system(size: 19, weight: .semibold))
+                    .foregroundStyle(player.repeatMode == .off ? .white.opacity(0.45) : NW.accent)
+                    .frame(width: 44, height: 44)
             }
-            .foregroundStyle(player.repeatMode == .off ? .white.opacity(0.5) : NW.blue)
+            .buttonStyle(.plain)
             .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity)
@@ -554,27 +660,44 @@ struct PlayerView: View {
 
     private func footer(_ track: Track) -> some View {
         HStack {
-            RoutePicker().frame(width: 42, height: 38)
-            Spacer()
-            HStack(spacing: 7) {
-                Circle().fill(player.isPlaying ? Color.green : player.isBuffering ? Color.orange : .white.opacity(0.35)).frame(width: 6, height: 6)
-                Text(library.localURL(track) != nil ? "SUR CET IPHONE" : player.isBuffering ? "CONNEXION…" : "AUDIO EN LIGNE")
-            }.font(.system(size: 8, weight: .bold)).tracking(1.4).foregroundStyle(.white.opacity(0.48))
-            Spacer(); IconButton(symbol: "list.bullet", label: "File d’attente") { showQueue = true }
-        }.frame(maxWidth: .infinity).frame(height: 42)
-    }
+            // 1. Lyrics Toggle (Apple Music style)
+            Button {
+                Haptic.light()
+                withAnimation(reduceMotion ? nil : .spring(response: 0.40, dampingFraction: 0.82)) {
+                    mode = (mode == .cover ? .lyrics : .cover)
+                }
+            } label: {
+                Image(systemName: mode == .lyrics ? "quote.bubble.fill" : "quote.bubble")
+                    .font(.system(size: 19, weight: .semibold))
+                    .foregroundStyle(mode == .lyrics ? .white : .white.opacity(0.55))
+                    .frame(width: 44, height: 44)
+                    .background(mode == .lyrics ? .white.opacity(0.18) : .clear, in: Circle())
+            }
+            .buttonStyle(.plain)
 
-    private func glassIcon(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 17, weight: .bold))
-                .foregroundStyle(.white)
+            Spacer()
+
+            // 2. AirPlay Route Picker
+            RoutePicker()
                 .frame(width: 44, height: 44)
-                .background(.white.opacity(0.14), in: Circle())
-                .contentShape(Rectangle())
+
+            Spacer()
+
+            // 3. Queue / Playlist
+            Button {
+                Haptic.light()
+                showQueue = true
+            } label: {
+                Image(systemName: "list.bullet")
+                    .font(.system(size: 19, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
         }
-        .buttonStyle(PressStyle())
-        .accessibilityLabel(label)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 20)
+        .frame(height: 48)
     }
 }
 

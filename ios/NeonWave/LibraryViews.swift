@@ -12,66 +12,130 @@ struct TrackRow: View {
     var playlist: Playlist? = nil
     @State private var confirmDelete = false
     @State private var showEditTrack = false
+
+    private var isCurrent: Bool {
+        player.current?.id == track.id
+    }
+
     var body: some View {
-        HStack(spacing: 12) {
-            Button {
-                if player.current?.id == track.id {
-                    if player.isPlaying { player.pause() } else { player.resume() }
-                } else {
-                    player.play(track, in: context.isEmpty ? [track] : context)
-                }
-            } label: {
-                HStack(spacing: 13) {
-                    CoverArt(track: track, imageURL: library.artworkURL(track), remoteURL: track.artworkURL, radius: 12).frame(width: 52, height: 52)
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(track.title).font(.subheadline.weight(.semibold)).foregroundStyle(player.current?.id == track.id ? NW.blue : .white).lineLimit(1)
-                        HStack(spacing: 4) {
-                            if library.localURL(track) != nil { Image(systemName: "arrow.down.circle.fill").foregroundStyle(NW.blue).font(.system(size: 10)) }
-                            Text(track.artist).font(.caption).foregroundStyle(NW.muted).lineLimit(1)
-                        }
-                    }.frame(maxWidth: .infinity, alignment: .leading)
-                }.contentShape(Rectangle())
-            }.buttonStyle(.plain).accessibilityLabel("Écouter \(track.title), \(track.artist)")
-            if let progress = downloads.progress[track.id] {
-                Button { downloads.cancel(track.id) } label: { ProgressView(value: progress).progressViewStyle(.circular).frame(width: 30) }.accessibilityLabel("Annuler le téléchargement")
-            } else if library.localURL(track) == nil && track.canDownload {
-                IconButton(symbol: "arrow.down.circle", label: "Télécharger \(track.title)") { downloads.download(track) }.foregroundStyle(NW.blue)
-            }
-            Menu {
-                Button("Voir l’artiste « \(track.artist) »", systemImage: "person.crop.circle") {
-                    artistRouter.open(name: track.artist, spotifyId: track.spotifyId)
-                }
-                Button(library.snapshot.likedIDs.contains(track.id) ? "Retirer des favoris" : "Ajouter aux favoris", systemImage: "heart") { library.toggleLike(track) }
-                Button("Ajouter à la file", systemImage: "text.line.first.and.arrowtriangle.forward") { player.enqueue(track) }
-                if session.account != nil && track.remoteID == nil {
-                    Button(library.uploading.contains(track.id) ? "Sauvegarde en cours…" : "Sauvegarder sur mon compte", systemImage: "icloud.and.arrow.up") { Task { await library.upload(track) } }.disabled(library.uploading.contains(track.id))
-                }
-                Menu("Ajouter à une playlist", systemImage: "text.badge.plus") {
-                    if library.playlists.isEmpty { Text("Créez une playlist dans Bibliothèque") }
-                    ForEach(library.playlists) { item in Button(item.name) { library.add(track, to: item) } }
-                }
-                if let playlist { Button("Retirer de cette playlist", systemImage: "minus.circle") { library.remove(track, from: playlist) } }
-                if track.isDownloadedSource && library.localURL(track) != nil {
-                    Button("Retirer le téléchargement", systemImage: "arrow.down.circle", role: .destructive) {
-                        if player.current?.id == track.id { player.stop() }; library.removeDownload(track)
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Button {
+                    if isCurrent {
+                        if player.isPlaying { player.pause() } else { player.resume() }
+                    } else {
+                        player.play(track, in: context.isEmpty ? [track] : context)
                     }
+                } label: {
+                    HStack(spacing: 12) {
+                        CoverArt(track: track, imageURL: library.artworkURL(track), remoteURL: track.artworkURL, radius: 8)
+                            .frame(width: 48, height: 48)
+                            .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(track.title)
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(isCurrent ? NW.accent : .white)
+                                .lineLimit(1)
+
+                            HStack(spacing: 4) {
+                                if library.localURL(track) != nil {
+                                    Image(systemName: "arrow.down.circle.fill")
+                                        .foregroundStyle(Color(white: 0.65))
+                                        .font(.system(size: 10))
+                                }
+                                Text(track.artist)
+                                    .font(.system(size: 13, weight: .regular))
+                                    .foregroundStyle(Color(white: 0.60))
+                                    .lineLimit(1)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .contentShape(Rectangle())
                 }
-                Button("Modifier le titre et la pochette", systemImage: "pencil") {
-                    showEditTrack = true
+                .buttonStyle(.plain)
+                .accessibilityLabel("Écouter \(track.title), \(track.artist)")
+
+                if let progress = downloads.progress[track.id] {
+                    Button { downloads.cancel(track.id) } label: {
+                        ProgressView(value: progress).progressViewStyle(.circular).frame(width: 28)
+                    }
+                    .accessibilityLabel("Annuler le téléchargement")
+                } else if library.localURL(track) == nil && track.canDownload {
+                    Button {
+                        Haptic.medium()
+                        downloads.download(track)
+                    } label: {
+                        Image(systemName: "arrow.down.circle")
+                            .font(.system(size: 18))
+                            .foregroundStyle(Color(white: 0.55))
+                            .frame(width: 36, height: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Télécharger \(track.title)")
                 }
-                Button("Supprimer de cet iPhone", systemImage: "trash", role: .destructive) { confirmDelete = true }
-            } label: { Image(systemName: "ellipsis").font(.body.bold()).foregroundStyle(NW.muted).frame(width: 36, height: 48) }.accessibilityLabel("Options de \(track.title)")
-        }.padding(.horizontal, 9).padding(.vertical, 7)
-            .background(player.current?.id == track.id ? NW.blue.opacity(0.11) : .white.opacity(0.025), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16).stroke(player.current?.id == track.id ? NW.blue.opacity(0.22) : .white.opacity(0.035)))
-            .confirmationDialog("Supprimer « \(track.title) » ?", isPresented: $confirmDelete, titleVisibility: .visible) {
-                Button("Supprimer le fichier et ses références", role: .destructive) {
-                    downloads.cancel(track.id); if player.current?.id == track.id { player.stop() }; library.deleteTrack(track)
+
+                Menu {
+                    Button("Voir l’artiste « \(track.artist) »", systemImage: "person.crop.circle") {
+                        artistRouter.open(name: track.artist, spotifyId: track.spotifyId)
+                    }
+                    Button(library.snapshot.likedIDs.contains(track.id) ? "Retirer des favoris" : "Ajouter aux favoris", systemImage: "heart") {
+                        library.toggleLike(track)
+                    }
+                    Button("Ajouter à la file", systemImage: "text.line.first.and.arrowtriangle.forward") {
+                        player.enqueue(track)
+                    }
+                    if session.account != nil && track.remoteID == nil {
+                        Button(library.uploading.contains(track.id) ? "Sauvegarde en cours…" : "Sauvegarder sur mon compte", systemImage: "icloud.and.arrow.up") {
+                            Task { await library.upload(track) }
+                        }
+                        .disabled(library.uploading.contains(track.id))
+                    }
+                    Menu("Ajouter à une playlist", systemImage: "text.badge.plus") {
+                        if library.playlists.isEmpty { Text("Créez une playlist dans Bibliothèque") }
+                        ForEach(library.playlists) { item in Button(item.name) { library.add(track, to: item) } }
+                    }
+                    if let playlist {
+                        Button("Retirer de cette playlist", systemImage: "minus.circle") { library.remove(track, from: playlist) }
+                    }
+                    if track.isDownloadedSource && library.localURL(track) != nil {
+                        Button("Retirer le téléchargement", systemImage: "arrow.down.circle", role: .destructive) {
+                            if player.current?.id == track.id { player.stop() }
+                            library.removeDownload(track)
+                        }
+                    }
+                    Button("Modifier le titre et la pochette", systemImage: "pencil") {
+                        showEditTrack = true
+                    }
+                    Button("Supprimer de cet iPhone", systemImage: "trash", role: .destructive) { confirmDelete = true }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(Color(white: 0.50))
+                        .frame(width: 36, height: 44)
+                        .contentShape(Rectangle())
                 }
-            } message: { Text("Le fichier sera retiré de cet iPhone et de vos playlists locales. Conservez une copie de votre fichier original.") }
-            .sheet(isPresented: $showEditTrack) {
-                TrackEditSheet(track: track)
+                .accessibilityLabel("Options de \(track.title)")
             }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(isCurrent ? Color.white.opacity(0.06) : Color.clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            Divider()
+                .overlay(Color.white.opacity(0.06))
+                .padding(.leading, 68)
+        }
+        .confirmationDialog("Supprimer « \(track.title) » ?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Supprimer le fichier et ses références", role: .destructive) {
+                downloads.cancel(track.id)
+                if player.current?.id == track.id { player.stop() }
+                library.deleteTrack(track)
+            }
+        } message: { Text("Le fichier sera retiré de cet iPhone et de vos playlists locales. Conservez une copie de votre fichier original.") }
+        .sheet(isPresented: $showEditTrack) {
+            TrackEditSheet(track: track)
+        }
     }
 }
 
@@ -106,24 +170,59 @@ struct TrackCollectionView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                CoverArt(index: symbol == "heart.fill" ? 2 : 0, symbol: symbol).frame(width: 190).shadow(color: NW.blue.opacity(0.15), radius: 35, y: 12).frame(maxWidth: .infinity).padding(.vertical, 12)
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(playlist?.name ?? title).font(.system(.largeTitle, design: .rounded, weight: .bold)).tracking(-1)
-                    Text("\(tracks.count) titres · \(Int(tracks.reduce(0) { $0 + $1.duration }) / 60) min").font(.subheadline).foregroundStyle(NW.muted)
+                CoverArt(index: symbol == "heart.fill" ? 2 : 0, symbol: symbol, radius: 18)
+                    .frame(width: 180)
+                    .shadow(color: .black.opacity(0.35), radius: 25, y: 10)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(playlist?.name ?? title)
+                        .font(.system(size: 26, weight: .bold))
+                        .tracking(-0.6)
+                        .foregroundStyle(.white)
+                    Text("\(tracks.count) titres · \(Int(tracks.reduce(0) { $0 + $1.duration }) / 60) min")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Color(white: 0.55))
                 }
+
                 HStack(spacing: 12) {
-                    PrimaryButton(title: "Écouter", symbol: "play.fill") {
+                    Button {
                         if let first = tracks.first(where: { player.isPlayable($0) }) ?? tracks.first {
+                            player.shuffle = false
                             player.play(first, in: tracks)
                         }
-                    }.disabled(tracks.isEmpty)
-                    IconButton(symbol: "shuffle", label: "Écouter en aléatoire") {
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "play.fill").font(.system(size: 14, weight: .bold))
+                            Text("Lecture").font(.system(size: 15, weight: .semibold))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 46)
+                        .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .foregroundStyle(.black)
+                    }
+                    .buttonStyle(PressStyle())
+                    .disabled(tracks.isEmpty)
+
+                    Button {
                         let available = tracks.filter { player.isPlayable($0) }
                         if let first = (available.isEmpty ? tracks : available).randomElement() {
                             player.shuffle = true
                             player.play(first, in: available.isEmpty ? tracks : available)
                         }
-                    }.background(NW.surface, in: RoundedRectangle(cornerRadius: 16))
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "shuffle").font(.system(size: 14, weight: .bold))
+                            Text("Aléatoire").font(.system(size: 15, weight: .semibold))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 46)
+                        .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .foregroundStyle(.white)
+                    }
+                    .buttonStyle(PressStyle())
+                    .disabled(tracks.isEmpty)
                 }
 
                 let undownloaded = tracks.filter { $0.canDownload && library.localURL($0) == nil }
@@ -133,25 +232,24 @@ struct TrackCollectionView: View {
                             downloads.showSuccessToast("Tous les titres de cette playlist sont déjà téléchargés.")
                         } else {
                             undownloaded.forEach(downloads.download)
-                            downloads.showSuccessToast("Téléchargement de la playlist lancé (\(undownloaded.count) titre\(undownloaded.count > 1 ? "s" : ""))")
+                            downloads.showSuccessToast("Téléchargement lancé (\(undownloaded.count) titres)")
                         }
                     } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: undownloaded.isEmpty ? "checkmark.circle.fill" : "arrow.down.circle.fill")
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundStyle(undownloaded.isEmpty ? Color.green : NW.blue)
-                            Text(undownloaded.isEmpty ? "Playlist téléchargée" : "Télécharger la playlist (\(undownloaded.count))")
-                                .font(.system(size: 14, weight: .bold))
+                        HStack(spacing: 8) {
+                            Image(systemName: undownloaded.isEmpty ? "checkmark.circle.fill" : "arrow.down.circle")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(undownloaded.isEmpty ? Color.green : Color.white.opacity(0.85))
+                            Text(undownloaded.isEmpty ? "Téléchargé" : "Télécharger la sélection (\(undownloaded.count))")
+                                .font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(.white)
                             Spacer()
                             if !undownloaded.isEmpty && undownloaded.contains(where: { downloads.progress[$0.id] != nil }) {
-                                ProgressView().tint(.white).scaleEffect(0.85)
+                                ProgressView().tint(.white).scaleEffect(0.8)
                             }
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-                        .background(NW.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(undownloaded.isEmpty ? Color.green.opacity(0.3) : NW.blue.opacity(0.3), lineWidth: 1))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                     .buttonStyle(PressStyle())
                 }
@@ -205,59 +303,146 @@ struct LibraryView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
-                HStack {
-                    SectionHeading(title: "Votre bibliothèque", eyebrow: "VOTRE COLLECTION")
-                    HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 22) {
+                HStack(alignment: .bottom) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("COLLECTION")
+                            .font(.system(size: 11, weight: .bold))
+                            .tracking(1.4)
+                            .foregroundStyle(Color(white: 0.55))
+                        Text("Bibliothèque")
+                            .font(.system(size: 32, weight: .bold))
+                            .tracking(-0.8)
+                            .foregroundStyle(.white)
+                    }
+                    Spacer()
+                    HStack(spacing: 8) {
                         Button {
                             showSpotifyImport = true
                         } label: {
                             Image(systemName: "arrow.down.to.line.compact")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(NW.cyan)
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(Color(white: 0.85))
                                 .frame(width: 36, height: 36)
-                                .background(NW.surface, in: Circle())
+                                .background(Color.white.opacity(0.08), in: Circle())
                         }
                         .accessibilityLabel("Importer une playlist Spotify")
-                        IconButton(symbol: "plus", label: "Créer une playlist") { newPlaylist = true }.background(NW.surface, in: Circle())
-                    }
-                }.padding(.top, 16)
-                ZStack(alignment: .leading) {
-                    LinearGradient(colors: [NW.violet.opacity(0.72), NW.blue.opacity(0.42), NW.surface], startPoint: .topLeading, endPoint: .bottomTrailing)
-                    HStack(spacing: 22) {
-                        libraryMetric(value: library.tracks.count, label: "TITRES", symbol: "music.note")
-                        Divider().overlay(.white.opacity(0.12)).frame(height: 50)
-                        libraryMetric(value: library.playlists.count, label: "PLAYLISTS", symbol: "square.stack.fill")
-                        Divider().overlay(.white.opacity(0.12)).frame(height: 50)
-                        libraryMetric(value: library.liked.count, label: "FAVORIS", symbol: "heart.fill")
-                    }.frame(maxWidth: .infinity).padding(20)
-                }.clipShape(RoundedRectangle(cornerRadius: 25, style: .continuous)).overlay(RoundedRectangle(cornerRadius: 25).stroke(.white.opacity(0.11)))
-                HStack(spacing: 12) {
-                    Button(action: importFiles) { Label("Importer", systemImage: "square.and.arrow.down").font(.subheadline.bold()).padding(14).frame(maxWidth: .infinity).background(NW.blue.opacity(0.18), in: Capsule()).overlay(Capsule().stroke(NW.blue.opacity(0.25))) }
-                    if session.account != nil {
-                        Button { Task { await library.sync() } } label: {
-                            HStack { if library.syncing { ProgressView() } else { Image(systemName: "arrow.triangle.2.circlepath") }; Text("Actualiser") }.font(.subheadline.bold()).padding(14).background(NW.surface, in: Capsule())
-                        }.disabled(library.syncing)
+
+                        Button {
+                            newPlaylist = true
+                        } label: {
+                            Image(systemName: "plus")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(Color(white: 0.85))
+                                .frame(width: 36, height: 36)
+                                .background(Color.white.opacity(0.08), in: Circle())
+                        }
+                        .accessibilityLabel("Créer une playlist")
                     }
                 }
-                VStack(spacing: 14) {
-                    NavigationLink { TrackCollectionView(title: "Tous les titres", kind: .all) } label: { collectionRow("Tous les titres", subtitle: "\(library.tracks.count) titres", symbol: "music.note", index: 0) }
-                    NavigationLink { TrackCollectionView(title: "Titres aimés", kind: .liked) } label: { collectionRow("Titres aimés", subtitle: "\(library.liked.count) coups de cœur", symbol: "heart.fill", index: 2) }
-                    NavigationLink { TrackCollectionView(title: "Sur cet iPhone", kind: .downloaded) } label: { collectionRow("Sur cet iPhone", subtitle: "\(library.downloaded.count) titres hors ligne", symbol: "arrow.down.circle.fill", index: 1) }
-                }.buttonStyle(PressStyle())
-                SectionHeading(title: "Vos playlists", eyebrow: "Toutes vos ambiances")
-                if library.playlists.isEmpty {
-                    EmptyLibrary(symbol: "square.stack", title: "À chaque moment, sa playlist.", description: "Un trajet, une soirée, un nouveau départ. Donnez un nom à votre prochaine sélection.", actionTitle: "Créer ma première playlist") { newPlaylist = true }
-                } else {
-                    LazyVGrid(columns: [.init(.flexible()), .init(.flexible())], alignment: .leading, spacing: 22) {
-                        ForEach(Array(library.playlists.enumerated()), id: \.element.id) { index, playlist in
-                            NavigationLink { TrackCollectionView(title: playlist.name, kind: .playlist(playlist.id)) } label: {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    CoverArt(index: index % 6, symbol: playlist.symbol)
-                                    Text(playlist.name).font(.subheadline.bold()).foregroundStyle(.white).lineLimit(2)
-                                    Text("\(playlist.trackIDs.count) titres").font(.caption).foregroundStyle(NW.muted)
+                .padding(.top, 12)
+
+                // Apple Music Library categories
+                VStack(spacing: 0) {
+                    NavigationLink {
+                        TrackCollectionView(title: "Tous les titres", kind: .all)
+                    } label: {
+                        categoryRow("Tous les titres", count: library.tracks.count, symbol: "music.note", tint: NW.accent)
+                    }
+
+                    categoryDivider
+
+                    NavigationLink {
+                        TrackCollectionView(title: "Titres aimés", kind: .liked)
+                    } label: {
+                        categoryRow("Titres aimés", count: library.liked.count, symbol: "heart.fill", tint: .pink)
+                    }
+
+                    categoryDivider
+
+                    NavigationLink {
+                        TrackCollectionView(title: "Sur cet iPhone", kind: .downloaded)
+                    } label: {
+                        categoryRow("Sur cet iPhone", count: library.downloaded.count, symbol: "arrow.down.circle.fill", tint: NW.accent)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color.white.opacity(0.07), lineWidth: 0.5))
+
+                HStack(spacing: 10) {
+                    Button(action: importFiles) {
+                        HStack(spacing: 7) {
+                            Image(systemName: "square.and.arrow.down")
+                                .font(.system(size: 14, weight: .semibold))
+                            Text("Importer des fichiers")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        .padding(.vertical, 11)
+                        .frame(maxWidth: .infinity)
+                        .background(Color.white.opacity(0.07), in: Capsule())
+                        .overlay(Capsule().stroke(Color.white.opacity(0.10), lineWidth: 0.5))
+                        .foregroundStyle(.white)
+                    }
+
+                    if session.account != nil {
+                        Button {
+                            Task { await library.sync() }
+                        } label: {
+                            HStack(spacing: 6) {
+                                if library.syncing {
+                                    ProgressView().tint(.white).scaleEffect(0.8)
+                                } else {
+                                    Image(systemName: "arrow.triangle.2.circlepath")
+                                        .font(.system(size: 13, weight: .semibold))
                                 }
-                            }.buttonStyle(PressStyle())
+                                Text("Synchroniser")
+                                    .font(.system(size: 13, weight: .semibold))
+                            }
+                            .padding(.vertical, 11)
+                            .frame(maxWidth: .infinity)
+                            .background(Color.white.opacity(0.07), in: Capsule())
+                            .overlay(Capsule().stroke(Color.white.opacity(0.10), lineWidth: 0.5))
+                            .foregroundStyle(.white)
+                        }
+                        .disabled(library.syncing)
+                    }
+                }
+
+                SectionHeading(title: "Vos playlists", eyebrow: "COLLECTION")
+
+                if library.playlists.isEmpty {
+                    EmptyLibrary(
+                        symbol: "square.stack",
+                        title: "À chaque moment, sa playlist.",
+                        description: "Créez une playlist pour vos trajets, séances ou soirées.",
+                        actionTitle: "Créer une playlist"
+                    ) {
+                        newPlaylist = true
+                    }
+                } else {
+                    LazyVGrid(columns: [.init(.flexible(), spacing: 16), .init(.flexible(), spacing: 16)], spacing: 18) {
+                        ForEach(Array(library.playlists.enumerated()), id: \.element.id) { index, playlist in
+                            NavigationLink {
+                                TrackCollectionView(title: playlist.name, kind: .playlist(playlist.id))
+                            } label: {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    CoverArt(index: index % 6, symbol: playlist.symbol, radius: 14)
+                                        .aspectRatio(1, contentMode: .fit)
+                                        .shadow(color: .black.opacity(0.25), radius: 8, y: 4)
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(playlist.name)
+                                            .font(.system(size: 14, weight: .semibold))
+                                            .foregroundStyle(.white)
+                                            .lineLimit(1)
+                                        Text("\(playlist.trackIDs.count) titres")
+                                            .font(.system(size: 12, weight: .regular))
+                                            .foregroundStyle(Color(white: 0.55))
+                                    }
+                                }
+                            }
+                            .buttonStyle(PressStyle())
                             .contextMenu {
                                 Button {
                                     let pTracks = library.playlistTracks(playlist)
@@ -266,7 +451,7 @@ struct LibraryView: View {
                                         downloads.showSuccessToast("Playlist déjà téléchargée.")
                                     } else {
                                         pending.forEach(downloads.download)
-                                        downloads.showSuccessToast("Téléchargement de « \(playlist.name) » lancé (\(pending.count) titre\(pending.count > 1 ? "s" : ""))")
+                                        downloads.showSuccessToast("Téléchargement de « \(playlist.name) » lancé (\(pending.count) titres)")
                                     }
                                 } label: {
                                     Label("Télécharger la playlist", systemImage: "arrow.down.circle")
@@ -275,9 +460,14 @@ struct LibraryView: View {
                         }
                     }
                 }
-            }.padding(22).padding(.bottom, 120)
-        }.scrollIndicators(.visible).scrollBounceBehavior(.always, axes: .vertical).alert("Une nouvelle ambiance", isPresented: $newPlaylist) {
-            TextField("Nom de votre playlist", text: $playlistName)
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 130)
+        }
+        .scrollIndicators(.visible)
+        .scrollBounceBehavior(.always, axes: .vertical)
+        .alert("Nouvelle playlist", isPresented: $newPlaylist) {
+            TextField("Nom de la playlist", text: $playlistName)
             Button("Annuler", role: .cancel) { playlistName = "" }
             Button("Créer") { library.createPlaylist(playlistName); playlistName = "" }
         } message: { Text("Vous pourrez y ajouter des titres de votre bibliothèque.") }
@@ -285,19 +475,36 @@ struct LibraryView: View {
             SpotifyPlaylistImportSheet()
         }
     }
-    private func collectionRow(_ title: String, subtitle: String, symbol: String, index: Int) -> some View {
-        HStack(spacing: 16) {
-            CoverArt(index: index, symbol: symbol, radius: 16).frame(width: 64)
-            VStack(alignment: .leading, spacing: 5) { Text(title).font(.subheadline.bold()).foregroundStyle(.white); Text(subtitle).font(.caption).foregroundStyle(NW.muted) }
-            Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(NW.muted)
-        }.padding(10).premiumPanel(radius: 20)
+
+    private func categoryRow(_ title: String, count: Int, symbol: String, tint: Color) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: symbol)
+                .font(.system(size: 19, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 28, height: 28)
+
+            Text(title)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(.white)
+
+            Spacer()
+
+            Text("\(count)")
+                .font(.system(size: 14, weight: .regular))
+                .foregroundStyle(Color(white: 0.50))
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color(white: 0.35))
+        }
+        .padding(.vertical, 13)
+        .contentShape(Rectangle())
     }
-    private func libraryMetric(value: Int, label: String, symbol: String) -> some View {
-        VStack(spacing: 6) {
-            Image(systemName: symbol).font(.system(size: 15, weight: .semibold)).foregroundStyle(NW.cyan)
-            Text("\(value)").font(.system(size: 22, weight: .bold, design: .rounded))
-            Text(label).font(.system(size: 7, weight: .bold)).tracking(1).foregroundStyle(NW.muted)
-        }.frame(maxWidth: .infinity)
+
+    private var categoryDivider: some View {
+        Divider()
+            .overlay(Color.white.opacity(0.07))
+            .padding(.leading, 42)
     }
 }
 
@@ -556,7 +763,18 @@ struct SearchView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                SectionHeading(title: "Retrouvez votre son.", eyebrow: "Recherche").padding(.top, 16)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("EXPLORER")
+                        .font(.system(size: 11, weight: .bold))
+                        .tracking(1.4)
+                        .foregroundStyle(Color(white: 0.55))
+                    Text("Recherche")
+                        .font(.system(size: 32, weight: .bold))
+                        .tracking(-0.8)
+                        .foregroundStyle(.white)
+                }
+                .padding(.top, 12)
+
                 if network.isActuallyOffline {
                     HStack(spacing: 8) {
                         Image(systemName: "wifi.slash")
@@ -564,16 +782,20 @@ struct SearchView: View {
                             .foregroundStyle(.orange)
                         Text("Mode hors connexion : recherche dans vos musiques enregistrées.")
                             .font(.caption.weight(.medium))
-                            .foregroundStyle(NW.muted)
+                            .foregroundStyle(Color(white: 0.60))
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
                     .background(Color.orange.opacity(0.12), in: Capsule())
                     .overlay(Capsule().stroke(Color.orange.opacity(0.25)))
                 }
-                HStack(spacing: 12) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(NW.muted)
-                    TextField("Rechercher un titre, Saïf, un album…", text: $query)
+
+                HStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(Color(white: 0.50))
+                    TextField("Artistes, titres, paroles…", text: $query)
+                        .font(.system(size: 16))
                         .autocorrectionDisabled()
                         .submitLabel(.search)
                         .onChange(of: query) { _, newValue in
@@ -585,12 +807,16 @@ struct SearchView: View {
                             onlineTracks = []
                             onlineAlbums = []
                         } label: {
-                            Image(systemName: "xmark.circle.fill").foregroundStyle(NW.muted)
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 15))
+                                .foregroundStyle(Color(white: 0.50))
                         }
                         .accessibilityLabel("Effacer la recherche")
                     }
                 }
-                .padding(17).premiumPanel(radius: 18)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 11)
+                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
 
                 Picker("Filtrer les titres", selection: $filter) {
                     Text("En ligne").tag(0)
@@ -708,26 +934,68 @@ struct SearchView: View {
     }
 
     private var discoveryLanding: some View {
-        VStack(alignment: .leading, spacing: 22) {
+        VStack(alignment: .leading, spacing: 24) {
             ZStack(alignment: .bottomLeading) {
-                LinearGradient(colors: [NW.blue.opacity(0.82), NW.violet.opacity(0.60), NW.surface], startPoint: .topLeading, endPoint: .bottomTrailing)
-                Circle().stroke(.white.opacity(0.10), lineWidth: 28).frame(width: 170).offset(x: 210, y: -35)
-                VStack(alignment: .leading, spacing: 11) {
-                    Label("CATALOGUE NEONWAVE", systemImage: "sparkles").font(.system(size: 9, weight: .bold)).tracking(1.6)
-                    Text("Cherchez. Lancez.\nVibrez.").font(.system(size: 29, weight: .bold, design: .rounded)).tracking(-0.9)
-                    Text("Titres, albums, artistes et paroles synchronisées.").font(.caption).foregroundStyle(.white.opacity(0.7))
-                }.padding(22)
-            }.frame(minHeight: 205).clipShape(RoundedRectangle(cornerRadius: 27, style: .continuous)).overlay(RoundedRectangle(cornerRadius: 27).stroke(.white.opacity(0.12)))
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.12, green: 0.10, blue: 0.20),
+                        Color(red: 0.05, green: 0.05, blue: 0.08)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
 
-            SectionHeading(title: "À découvrir", eyebrow: "RECHERCHES RAPIDES")
-            LazyVGrid(columns: [.init(.flexible()), .init(.flexible()), .init(.flexible())], spacing: 10) {
+                Circle()
+                    .fill(NW.accent.opacity(0.18))
+                    .frame(width: 220)
+                    .blur(radius: 60)
+                    .offset(x: 140, y: -40)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("CATALOGUE", systemImage: "sparkles")
+                        .font(.system(size: 10, weight: .bold))
+                        .tracking(1.4)
+                        .foregroundStyle(NW.accent)
+
+                    Text("Explorez des millions\nde morceaux.")
+                        .font(.system(size: 26, weight: .bold))
+                        .tracking(-0.6)
+                        .foregroundStyle(.white)
+
+                    Text("Streaming immédiat, paroles synchronisées et téléchargements.")
+                        .font(.subheadline)
+                        .foregroundStyle(Color(white: 0.65))
+                }
+                .padding(22)
+            }
+            .frame(minHeight: 180)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Color.white.opacity(0.10), lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.30), radius: 18, y: 8)
+
+            SectionHeading(title: "Recherches tendance", eyebrow: "SUGGESTIONS")
+
+            LazyVGrid(columns: [.init(.flexible(), spacing: 10), .init(.flexible(), spacing: 10), .init(.flexible(), spacing: 10)], spacing: 10) {
                 ForEach(suggestions, id: \.self) { name in
                     Button {
-                        query = name; triggerSearch(name)
+                        query = name
+                        triggerSearch(name)
                     } label: {
-                        HStack(spacing: 7) { Image(systemName: "waveform").foregroundStyle(NW.cyan); Text(name).lineLimit(1) }
-                            .font(.caption.bold()).frame(maxWidth: .infinity).padding(.vertical, 13).premiumPanel(radius: 16)
-                    }.buttonStyle(PressStyle())
+                        HStack(spacing: 6) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Color(white: 0.50))
+                            Text(name)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.white.opacity(0.08), lineWidth: 0.5))
+                    }
+                    .buttonStyle(PressStyle())
                 }
             }
         }
@@ -771,61 +1039,113 @@ struct AlbumDetailView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 24) {
-                    CoverArt(index: 2, remoteURL: album.coverURL, radius: 24)
-                        .frame(width: 220, height: 220)
-                        .shadow(color: NW.blue.opacity(0.3), radius: 25, y: 15)
-                        .padding(.top, 16)
+                VStack(spacing: 20) {
+                    CoverArt(index: 2, remoteURL: album.coverURL, radius: 20)
+                        .frame(width: 200, height: 200)
+                        .shadow(color: .black.opacity(0.35), radius: 25, y: 12)
+                        .padding(.top, 14)
 
-                    VStack(spacing: 6) {
-                        Text(album.title).font(.system(.title2, design: .rounded, weight: .bold)).foregroundStyle(.white).multilineTextAlignment(.center)
-                        Text(album.artist).font(.subheadline).foregroundStyle(NW.muted)
+                    VStack(spacing: 4) {
+                        Text(album.title)
+                            .font(.system(size: 24, weight: .bold))
+                            .tracking(-0.5)
+                            .foregroundStyle(.white)
+                            .multilineTextAlignment(.center)
+                        Text(album.artist)
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(Color(white: 0.60))
                         if let count = album.trackCount {
-                            Text("\(count) morceaux • NeonWave").font(.caption).foregroundStyle(NW.blue)
+                            Text("\(count) morceaux")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Color(white: 0.45))
                         }
                     }
 
                     if !tracks.isEmpty {
-                        PrimaryButton(title: "Écouter l’album", symbol: "play.fill") {
-                            if let first = tracks.first {
-                                player.play(first, in: tracks)
+                        HStack(spacing: 12) {
+                            Button {
+                                if let first = tracks.first {
+                                    player.shuffle = false
+                                    player.play(first, in: tracks)
+                                }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "play.fill").font(.system(size: 14, weight: .bold))
+                                    Text("Lecture").font(.system(size: 15, weight: .semibold))
+                                }
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 46)
+                                .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .foregroundStyle(.black)
                             }
+                            .buttonStyle(PressStyle())
+
+                            Button {
+                                if let randomTrack = tracks.randomElement() {
+                                    player.shuffle = true
+                                    player.play(randomTrack, in: tracks)
+                                }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "shuffle").font(.system(size: 14, weight: .bold))
+                                    Text("Aléatoire").font(.system(size: 15, weight: .semibold))
+                                }
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 46)
+                                .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .foregroundStyle(.white)
+                            }
+                            .buttonStyle(PressStyle())
                         }
-                        .padding(.horizontal, 24)
+                        .padding(.horizontal, 22)
                     }
 
                     if loading {
-                        ProgressView().tint(NW.blue).frame(height: 100)
+                        ProgressView().tint(.white).frame(height: 100)
                     } else if tracks.isEmpty {
-                        Text("Aucune piste trouvée pour cet album.").font(.subheadline).foregroundStyle(NW.muted).padding()
+                        Text("Aucune piste trouvée pour cet album.")
+                            .font(.subheadline)
+                            .foregroundStyle(Color(white: 0.55))
+                            .padding()
                     } else {
-                        VStack(spacing: 2) {
+                        VStack(spacing: 0) {
                             ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
-                                HStack(spacing: 14) {
-                                    Text("\(index + 1)")
-                                        .font(.subheadline.monospacedDigit())
-                                        .foregroundStyle(NW.muted)
-                                        .frame(width: 24, alignment: .trailing)
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(track.title)
-                                            .font(.subheadline.weight(.semibold))
-                                            .foregroundStyle(player.current?.id == track.id ? NW.blue : .white)
-                                            .lineLimit(1)
-                                        Text(track.duration.clockTime)
-                                            .font(.caption2.monospacedDigit())
-                                            .foregroundStyle(NW.muted)
+                                Button {
+                                    player.play(track, in: tracks)
+                                } label: {
+                                    HStack(spacing: 14) {
+                                        Text("\(index + 1)")
+                                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                                            .foregroundStyle(player.current?.id == track.id ? NW.accent : Color(white: 0.40))
+                                            .frame(width: 24, alignment: .trailing)
+
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(track.title)
+                                                .font(.system(size: 15, weight: .medium))
+                                                .foregroundStyle(player.current?.id == track.id ? NW.accent : .white)
+                                                .lineLimit(1)
+                                            Text(track.duration.clockTime)
+                                                .font(.caption2.monospacedDigit())
+                                                .foregroundStyle(Color(white: 0.50))
+                                        }
+
+                                        Spacer()
+
+                                        if player.current?.id == track.id && player.isPlaying {
+                                            Image(systemName: "waveform")
+                                                .font(.system(size: 14, weight: .bold))
+                                                .foregroundStyle(NW.accent)
+                                        }
                                     }
-                                    Spacer()
-                                    Button {
-                                        player.play(track, in: tracks)
-                                    } label: {
-                                        Image(systemName: player.current?.id == track.id && player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                                            .font(.title3)
-                                            .foregroundStyle(NW.blue)
-                                    }
+                                    .padding(.horizontal, 22)
+                                    .padding(.vertical, 10)
+                                    .contentShape(Rectangle())
                                 }
-                                .padding(.horizontal, 22)
-                                .padding(.vertical, 8)
+                                .buttonStyle(.plain)
+
+                                Divider()
+                                    .overlay(Color.white.opacity(0.06))
+                                    .padding(.leading, 60)
                             }
                         }
                     }
@@ -864,51 +1184,100 @@ struct DownloadsView: View {
     let importFiles: () -> Void
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
-                SectionHeading(title: "Prêt à vous suivre.", eyebrow: "Hors connexion").padding(.top, 16)
-                HStack(spacing: 20) {
-                    Image(systemName: "airplane").font(.system(size: 36, weight: .light)).rotationEffect(.degrees(-15)).foregroundStyle(NW.blue)
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("\(library.downloaded.count) titres avec vous").font(.headline)
-                        Text("\(ByteCountFormatter.string(fromByteCount: library.storageBytes, countStyle: .file)) sur cet iPhone").font(.caption).foregroundStyle(NW.muted)
+            VStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("STOCKAGE")
+                        .font(.system(size: 11, weight: .bold))
+                        .tracking(1.4)
+                        .foregroundStyle(Color(white: 0.55))
+                    Text("Téléchargements")
+                        .font(.system(size: 32, weight: .bold))
+                        .tracking(-0.8)
+                        .foregroundStyle(.white)
+                }
+                .padding(.top, 12)
+
+                HStack(spacing: 16) {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.system(size: 32))
+                        .foregroundStyle(NW.accent)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("\(library.downloaded.count) morceaux sur cet iPhone")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.white)
+                        Text("\(ByteCountFormatter.string(fromByteCount: library.storageBytes, countStyle: .file)) d'espace utilisé")
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(Color(white: 0.55))
                     }
-                }.padding(24).frame(maxWidth: .infinity, alignment: .leading).premiumPanel(radius: 24)
+                }
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .premiumPanel(radius: 18)
+
                 Toggle(isOn: Binding(get: { library.snapshot.wifiOnly }, set: library.setWifiOnly)) {
-                    VStack(alignment: .leading, spacing: 4) { Text("Télécharger en Wi-Fi uniquement").font(.subheadline.bold()); Text("Appliqué aux prochains téléchargements.").font(.caption).foregroundStyle(NW.muted) }
-                }.tint(NW.blue)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Télécharger en Wi-Fi uniquement")
+                            .font(.system(size: 15, weight: .medium))
+                        Text("Économise les données cellulaires.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color(white: 0.55))
+                    }
+                }
+                .tint(NW.accent)
+
                 if !downloads.progress.isEmpty {
                     SectionHeading(title: "En cours")
                     ForEach(library.tracks.filter { downloads.progress[$0.id] != nil }) { track in
                         VStack(alignment: .leading, spacing: 8) {
-                            HStack { Text(track.title).font(.subheadline).lineLimit(1); Spacer(); Button("Annuler") { downloads.cancel(track.id) }.font(.caption) }
-                            ProgressView(value: downloads.progress[track.id] ?? 0).tint(NW.blue)
+                            HStack {
+                                Text(track.title).font(.system(size: 14, weight: .medium)).lineLimit(1)
+                                Spacer()
+                                Button("Annuler") { downloads.cancel(track.id) }
+                                    .font(.caption.bold())
+                                    .foregroundStyle(Color(white: 0.60))
+                            }
+                            ProgressView(value: downloads.progress[track.id] ?? 0).tint(NW.accent)
                         }
+                        .padding(.vertical, 4)
                     }
                 }
+
                 let pending = library.tracks.filter { $0.canDownload && library.localURL($0) == nil }
                 if !pending.isEmpty {
-                    HStack { SectionHeading(title: "À emporter"); Button("Tout télécharger") { pending.forEach(downloads.download) }.font(.caption.bold()) }
+                    HStack {
+                        SectionHeading(title: "À emporter")
+                        Spacer()
+                        Button("Tout télécharger") { pending.forEach(downloads.download) }
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(NW.accent)
+                    }
                     ForEach(pending) { TrackRow(track: $0) }
                 }
+
                 if library.downloaded.isEmpty {
-                    EmptyLibrary(symbol: "arrow.down.circle", title: "La musique, même sans réseau.", description: "Téléchargez un titre depuis Recherche ou importez vos propres fichiers audio.", actionTitle: "Importer des fichiers", action: importFiles)
+                    EmptyLibrary(
+                        symbol: "arrow.down.circle",
+                        title: "La musique, même sans réseau.",
+                        description: "Téléchargez des titres depuis Recherche ou importez vos fichiers audio.",
+                        actionTitle: "Importer des fichiers",
+                        action: importFiles
+                    )
                 } else {
                     HStack(spacing: 12) {
                         Button {
                             if let first = library.downloaded.first {
+                                player.shuffle = false
                                 player.play(first, in: library.downloaded)
                             }
                         } label: {
                             HStack(spacing: 8) {
-                                Image(systemName: "play.fill")
-                                    .font(.system(size: 14, weight: .bold))
-                                Text("Tout écouter")
-                                    .font(.subheadline.bold())
+                                Image(systemName: "play.fill").font(.system(size: 14, weight: .bold))
+                                Text("Lecture").font(.system(size: 15, weight: .semibold))
                             }
-                            .foregroundStyle(.black)
                             .frame(maxWidth: .infinity)
-                            .frame(height: 44)
-                            .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .frame(height: 46)
+                            .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .foregroundStyle(.black)
                         }
                         .buttonStyle(PressStyle())
 
@@ -919,22 +1288,21 @@ struct DownloadsView: View {
                             }
                         } label: {
                             HStack(spacing: 8) {
-                                Image(systemName: "shuffle")
-                                    .font(.system(size: 14, weight: .bold))
-                                Text("Aléatoire")
-                                    .font(.subheadline.bold())
+                                Image(systemName: "shuffle").font(.system(size: 14, weight: .bold))
+                                Text("Aléatoire").font(.system(size: 15, weight: .semibold))
                             }
-                            .foregroundStyle(.white)
                             .frame(maxWidth: .infinity)
-                            .frame(height: 44)
-                            .background(NW.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.10)))
+                            .frame(height: 46)
+                            .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .foregroundStyle(.white)
                         }
                         .buttonStyle(PressStyle())
                     }
 
-                    SectionHeading(title: "Disponibles hors connexion")
-                    LazyVStack(spacing: 2) { ForEach(library.downloaded) { TrackRow(track: $0, context: library.downloaded) } }
+                    SectionHeading(title: "Morceaux téléchargés", eyebrow: "DISPONIBLE HORS LIGNE")
+                    LazyVStack(spacing: 0) {
+                        ForEach(library.downloaded) { TrackRow(track: $0, context: library.downloaded) }
+                    }
                 }
             }.padding(22).padding(.bottom, 120)
         }.scrollIndicators(.visible).scrollBounceBehavior(.always, axes: .vertical)

@@ -17,20 +17,20 @@ struct WelcomeView: View {
                         VStack(spacing: 14) {
                             WaveMark(size: 68)
                             Text("neonwave")
-                                .font(.system(size: 24, weight: .bold, design: .rounded))
-                                .tracking(-0.9)
+                                .font(.system(size: 24, weight: .bold))
+                                .tracking(-0.6)
                         }
 
                         Spacer(minLength: 34)
 
                         VStack(spacing: 12) {
                             Text("Votre musique.\nSimplement.")
-                                .font(.system(size: 39, weight: .bold, design: .rounded))
-                                .tracking(-1.6)
+                                .font(.system(size: 36, weight: .bold))
+                                .tracking(-1.0)
                                 .multilineTextAlignment(.center)
                             Text("Connectez-vous pour retrouver votre univers NeonWave.")
                                 .font(.subheadline)
-                                .foregroundStyle(NW.muted)
+                                .foregroundStyle(Color(white: 0.60))
                                 .multilineTextAlignment(.center)
                                 .lineSpacing(4)
                         }
