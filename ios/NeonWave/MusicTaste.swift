@@ -152,7 +152,9 @@ enum ArtistDiscoveryService {
                 authenticated: false,
                 queryItems: [.init(name: "q", value: value)]
             )
-            return response?.items.filter { !$0.spotifyId.isEmpty && $0.source == "spotify" } ?? []
+            if let items = response?.items, !items.isEmpty {
+                return items
+            }
         }
         guard var components = URLComponents(string: "https://api.deezer.com/search/artist") else { return [] }
         components.queryItems = [.init(name: "q", value: value), .init(name: "limit", value: "8")]

@@ -249,7 +249,7 @@ enum CrossfadeMath {
 
         // ── Auto-avance si la chanson est terminée mais le stream continue ──
         // (ex: vidéo YouTube de 4min pour une chanson de 2min05)
-        if spotifyDuration > 0 && isPlaying && elapsed > spotifyDuration + 2.0 {
+        if spotifyDuration > 15 && isPlaying && elapsed > spotifyDuration + 2.0 {
             next(automatic: true)
             return
         }
@@ -542,6 +542,14 @@ enum CrossfadeMath {
         shuffleHistory = []; loadCurrent()
     }
 
+    private func isPreviewStream(_ stream: String?) -> Bool {
+        guard let stream, !stream.isEmpty else { return false }
+        return stream.contains("dzcdn.net") ||
+               stream.contains("itunes.apple.com") ||
+               stream.contains("apple.com/us/r1000") ||
+               stream.contains("preview")
+    }
+
     private func loadCurrent() {
         guard queue.indices.contains(index) else { stop(); return }
         let target = queue[index]
@@ -581,8 +589,8 @@ enum CrossfadeMath {
         }
 
         // 2. Online track: resolve the complete song, then play it natively.
-        // Fast-path: if streamURL is already known on this track (e.g. from background queue preloading), start AVPlayer immediately!
-        if let stream = target.streamURL, let url = URL(string: stream) {
+        // Fast-path: if streamURL is already known on this track (and not a preview snippet), start AVPlayer immediately!
+        if let stream = target.streamURL, !isPreviewStream(stream), let url = URL(string: stream) {
             isAppleMusicActive = false
             isYouTubeActive = false
             SilentAudioKeepAlive.shared.stop()
@@ -932,7 +940,9 @@ enum CrossfadeMath {
         updateActiveLyric()
     }
 
-    func seek(to lyric: LyricLine) { seek(lyric.time + lyricsOffset) }
+    func seek(to lyric: LyricLine) {
+        seek(max(0, lyric.time + lyricsOffset))
+    }
 
     func toggle() { isPlaying ? pause() : resume() }
 
@@ -989,7 +999,11 @@ enum CrossfadeMath {
     func seek(_ seconds: Double) {
         guard seconds.isFinite else { return }
         cancelCrossfade()
-        let targetTime = min(max(0, seconds), duration > 0 ? duration : seconds)
+        let maxDuration = (player.currentItem?.duration.seconds.isFinite == true && player.currentItem!.duration.seconds > 0)
+            ? player.currentItem!.duration.seconds
+            : (duration > 0 ? duration : seconds)
+        let safeMax = maxDuration > 1.0 ? maxDuration - 0.5 : maxDuration
+        let targetTime = min(max(0, seconds), safeMax)
         elapsed = targetTime
         if isAppleMusicActive {
             appleMusicPlayer.playbackTime = targetTime
@@ -998,7 +1012,7 @@ enum CrossfadeMath {
             YouTubePlayer.shared.seek(to: targetTime)
 #endif
         } else {
-            player.seek(to: CMTime(seconds: targetTime, preferredTimescale: 600))
+            player.seek(to: CMTime(seconds: targetTime, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
         }
         updateActiveLyric()
         updateNowPlaying()

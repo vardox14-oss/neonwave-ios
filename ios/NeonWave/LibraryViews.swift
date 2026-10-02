@@ -745,12 +745,14 @@ struct SearchView: View {
     @EnvironmentObject private var player: AudioPlayer
     @EnvironmentObject private var downloads: DownloadManager
     @EnvironmentObject private var network: NetworkMonitor
+    @EnvironmentObject private var artistRouter: ArtistRouter
     @State private var query = ""
     @State private var filter = 0
     @State private var searching = false
     @State private var searchTask: Task<Void, Never>?
     @State private var onlineTracks: [Track] = []
     @State private var onlineAlbums: [Album] = []
+    @State private var onlineArtists: [ArtistChoice] = []
     @State private var selectedAlbum: Album?
     private let suggestions = ["Ninho", "Saïf", "Tiakola", "Damso", "Gazo", "SCH"]
 
@@ -806,6 +808,7 @@ struct SearchView: View {
                             query = ""
                             onlineTracks = []
                             onlineAlbums = []
+                            onlineArtists = []
                         } label: {
                             Image(systemName: "xmark.circle.fill")
                                 .font(.system(size: 15))
@@ -857,13 +860,102 @@ struct SearchView: View {
                         .frame(maxWidth: .infinity, minHeight: 180)
                     } else if query.trimmingCharacters(in: .whitespaces).isEmpty {
                         discoveryLanding
-                    } else if onlineTracks.isEmpty && onlineAlbums.isEmpty {
+                    } else if onlineTracks.isEmpty && onlineAlbums.isEmpty && onlineArtists.isEmpty {
                         EmptyLibrary(
                             symbol: "magnifyingglass",
                             title: "Aucun résultat pour « \(query) »",
                             description: "Vérifiez l'orthographe ou essayez un autre mot-clé."
                         )
                     } else {
+                        let trimmedQ = query.trimmingCharacters(in: .whitespaces)
+                        if let topArtist = onlineArtists.first,
+                           !trimmedQ.isEmpty,
+                           (topArtist.name.localizedCaseInsensitiveContains(trimmedQ) || trimmedQ.localizedCaseInsensitiveContains(topArtist.name)) {
+                            VStack(alignment: .leading, spacing: 10) {
+                                SectionHeading(title: "Meilleur résultat", eyebrow: "Artiste")
+                                Button {
+                                    artistRouter.open(artist: topArtist)
+                                } label: {
+                                    HStack(spacing: 16) {
+                                        AsyncImage(url: URL(string: topArtist.imageUrl)) { phase in
+                                            if let image = phase.image {
+                                                image.resizable().aspectRatio(contentMode: .fill)
+                                            } else {
+                                                Circle().fill(Color.white.opacity(0.12))
+                                                    .overlay(Image(systemName: "person.fill").foregroundStyle(.white.opacity(0.5)).font(.system(size: 26)))
+                                            }
+                                        }
+                                        .frame(width: 64, height: 64)
+                                        .clipShape(Circle())
+                                        .overlay(Circle().stroke(Color.white.opacity(0.15), lineWidth: 0.5))
+                                        .shadow(color: .black.opacity(0.3), radius: 8, y: 3)
+
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(topArtist.name)
+                                                .font(.system(size: 18, weight: .bold))
+                                                .foregroundStyle(.white)
+                                                .lineLimit(1)
+                                            Text("Artiste")
+                                                .font(.system(size: 13, weight: .medium))
+                                                .foregroundStyle(Color(white: 0.60))
+                                        }
+
+                                        Spacer()
+
+                                        Image(systemName: "chevron.right")
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundStyle(Color(white: 0.40))
+                                    }
+                                    .padding(14)
+                                    .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color.white.opacity(0.08), lineWidth: 0.5))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+
+                        if !onlineArtists.isEmpty {
+                            VStack(alignment: .leading, spacing: 12) {
+                                SectionHeading(title: "Artistes", eyebrow: "Catalogue")
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 18) {
+                                        ForEach(onlineArtists) { artist in
+                                            Button {
+                                                artistRouter.open(artist: artist)
+                                            } label: {
+                                                VStack(spacing: 8) {
+                                                    AsyncImage(url: URL(string: artist.imageUrl)) { phase in
+                                                        if let image = phase.image {
+                                                            image.resizable().aspectRatio(contentMode: .fill)
+                                                        } else {
+                                                            Circle().fill(Color.white.opacity(0.12))
+                                                                .overlay(Image(systemName: "person.fill").foregroundStyle(.white.opacity(0.5)).font(.system(size: 22)))
+                                                        }
+                                                    }
+                                                    .frame(width: 80, height: 80)
+                                                    .clipShape(Circle())
+                                                    .overlay(Circle().stroke(Color.white.opacity(0.15), lineWidth: 0.5))
+                                                    .shadow(color: .black.opacity(0.25), radius: 6, y: 3)
+
+                                                    Text(artist.name)
+                                                        .font(.system(size: 13, weight: .semibold))
+                                                        .foregroundStyle(.white)
+                                                        .lineLimit(1)
+                                                        .frame(width: 86)
+
+                                                    Text("Artiste")
+                                                        .font(.system(size: 11, weight: .regular))
+                                                        .foregroundStyle(Color(white: 0.55))
+                                                }
+                                            }
+                                            .buttonStyle(.plain)
+                                        }
+                                    }
+                                    .padding(.horizontal, 2)
+                                }
+                            }
+                        }
+
                         if !onlineAlbums.isEmpty {
                             SectionHeading(title: "Albums", eyebrow: "Découverte")
                             ScrollView(.horizontal, showsIndicators: false) {
@@ -1005,7 +1097,7 @@ struct SearchView: View {
         let trimmed = q.trimmingCharacters(in: .whitespaces)
         searchTask?.cancel()
         guard !trimmed.isEmpty else {
-            onlineTracks = []; onlineAlbums = []; searching = false; return
+            onlineTracks = []; onlineAlbums = []; onlineArtists = []; searching = false; return
         }
         if network.isActuallyOffline {
             searching = false
@@ -1017,11 +1109,13 @@ struct SearchView: View {
             guard !Task.isCancelled else { return }
             async let tracks = MusicCatalogService.searchTracks(trimmed)
             async let albums = MusicCatalogService.searchAlbums(trimmed)
-            let (t, a) = await (tracks, albums)
+            async let artists = ArtistDiscoveryService.search(trimmed)
+            let (t, a, art) = await (tracks, albums, artists)
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 self.onlineTracks = t
                 self.onlineAlbums = a
+                self.onlineArtists = art
                 self.searching = false
             }
         }

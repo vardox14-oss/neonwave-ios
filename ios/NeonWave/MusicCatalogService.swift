@@ -138,8 +138,7 @@ enum MusicCatalogService {
                 if (response as? HTTPURLResponse)?.statusCode == 200,
                    let decoded = try? JSONDecoder().decode(DeezerSearchResponse.self, from: data),
                    let items = decoded.data, !items.isEmpty {
-                    return items.compactMap { item in
-                        guard let preview = item.preview, !preview.isEmpty, URL(string: preview) != nil else { return nil }
+                    return items.map { item in
                         let cover = item.album?.cover_xl ?? item.album?.cover_big ?? item.album?.cover_medium
                         return Track(
                             id: "dz-\(item.id)",
@@ -148,7 +147,7 @@ enum MusicCatalogService {
                             duration: Double(item.duration),
                             album: item.album?.title,
                             artworkURL: cover,
-                            streamURL: preview
+                            streamURL: nil
                         )
                     }
                 }
@@ -162,8 +161,7 @@ enum MusicCatalogService {
                 if let decoded = try? JSONDecoder().decode(ITunesResponse.self, from: data),
                    let items = decoded.results {
                     return items.compactMap { item in
-                        guard let id = item.trackId, let title = item.trackName, let artist = item.artistName,
-                              let preview = item.previewUrl, !preview.isEmpty, URL(string: preview) != nil else { return nil }
+                        guard let id = item.trackId, let title = item.trackName, let artist = item.artistName else { return nil }
                         let cover = item.artworkUrl100?.replacingOccurrences(of: "100x100", with: "600x600")
                         let dur = Double(item.trackTimeMillis ?? 0) / 1000.0
                         return Track(
@@ -173,7 +171,7 @@ enum MusicCatalogService {
                             duration: dur,
                             album: item.collectionName,
                             artworkURL: cover,
-                            streamURL: preview
+                            streamURL: nil
                         )
                     }
                 }
@@ -216,16 +214,15 @@ enum MusicCatalogService {
             let (data, _) = try await URLSession.shared.data(from: url)
             if let decoded = try? JSONDecoder().decode(DeezerAlbumTracksResponse.self, from: data),
                let items = decoded.data {
-                return items.compactMap { item in
-                    guard let preview = item.preview, !preview.isEmpty, URL(string: preview) != nil else { return nil }
-                    return Track(
+                return items.map { item in
+                    Track(
                         id: "dz-\(item.id)",
                         title: item.title,
                         artist: item.artist.name.isEmpty ? artistName : item.artist.name,
                         duration: Double(item.duration),
                         album: albumTitle,
                         artworkURL: coverURL,
-                        streamURL: preview
+                        streamURL: nil
                     )
                 }
             }
