@@ -352,7 +352,7 @@ enum MusicCatalogService {
 
         // 1. Instant cache fast-path: if YouTube video ID was previously resolved, skip metadata search and directly obtain stream URL
         if let cachedVid = ytCache[key], !cachedVid.isEmpty {
-            if let streamURL = await serverStreamURL(videoId: cachedVid) {
+            if let streamURL = await nativeStreamURL(videoId: cachedVid) {
                 return ResolvedMedia(
                     videoId: cachedVid,
                     duration: duration > 0 ? duration : nil,
@@ -381,12 +381,7 @@ enum MusicCatalogService {
                     }
                     return nil
                 }()
-                let finalStreamURL: URL?
-                if let sURL {
-                    finalStreamURL = sURL
-                } else {
-                    finalStreamURL = await serverStreamURL(videoId: resolved.videoId)
-                }
+                let finalStreamURL: URL? = await nativeStreamURL(videoId: resolved.videoId) ?? sURL
                 return ResolvedMedia(
                     videoId: resolved.videoId,
                     duration: resolved.duration,
@@ -400,7 +395,7 @@ enum MusicCatalogService {
         }
 
         if let vid = await resolveYouTubeId(title: title, artist: artist, duration: duration, spotifyId: spotifyId) {
-            let streamURL = await serverStreamURL(videoId: vid)
+            let streamURL = await nativeStreamURL(videoId: vid)
             return ResolvedMedia(videoId: vid, duration: duration > 0 ? duration : nil, title: title, artist: artist, spotifyId: spotifyId, thumbnail: nil, streamURL: streamURL)
         }
         return nil

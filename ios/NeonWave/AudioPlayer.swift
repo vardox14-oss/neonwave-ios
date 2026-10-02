@@ -462,7 +462,7 @@ enum CrossfadeMath {
                 self.bufferingWatchdogTask?.cancel()
                 // If Topic track is blocked by YouTube embed rules (Error 101 or 150), fallback to server stream or alternative non-blocked video
                 Task {
-                    if let vid = cur.videoId, let streamURL = await MusicCatalogService.serverStreamURL(videoId: vid) {
+                    if let vid = cur.videoId, let streamURL = await MusicCatalogService.nativeStreamURL(videoId: vid) {
                         await MainActor.run {
                             guard self.current?.id == cur.id else { return }
                             self.startAVPlayerPlayback(url: streamURL)
@@ -724,7 +724,7 @@ enum CrossfadeMath {
         Task { [weak self] in
             guard let self else { return }
             // 1. Try direct high-quality audio stream via native AVPlayer (bypasses YouTube iframe embed restrictions)
-            if let streamURL = await MusicCatalogService.serverStreamURL(videoId: videoId) {
+            if let streamURL = await MusicCatalogService.nativeStreamURL(videoId: videoId) {
                 await MainActor.run {
                     guard self.current?.id == trackID else { return }
                     self.startAVPlayerPlayback(url: streamURL, fallbackVideoId: videoId)
@@ -754,8 +754,8 @@ enum CrossfadeMath {
             await MainActor.run {
                 guard let self, self.isYouTubeActive, self.isBuffering, !self.isPlaying, let cur = self.current else { return }
                 Task {
-                    // 1. Try server stream URL
-                    if let streamURL = await MusicCatalogService.serverStreamURL(videoId: videoId) {
+                    // 1. Try native/server stream URL
+                    if let streamURL = await MusicCatalogService.nativeStreamURL(videoId: videoId) {
                         await MainActor.run {
                             guard self.current?.id == cur.id, self.isYouTubeActive, !self.isPlaying else { return }
                             self.startAVPlayerPlayback(url: streamURL)
@@ -798,7 +798,17 @@ enum CrossfadeMath {
                 if item.status == .failed {
                     print("⚠️ AVPlayer playback failed for \(url): \(String(describing: item.error))")
                     if let fallbackVideoId {
-                        self.startYouTubePlayback(videoId: fallbackVideoId)
+                        Task {
+                            if let directURL = await MusicCatalogService.nativeStreamURL(videoId: fallbackVideoId), directURL != url {
+                                await MainActor.run {
+                                    self.startAVPlayerPlayback(url: directURL, fallbackVideoId: nil)
+                                }
+                                return
+                            }
+                            await MainActor.run {
+                                self.startYouTubePlayback(videoId: fallbackVideoId)
+                            }
+                        }
                     } else {
                         self.error = "Ce flux audio ne peut pas être lu."
                         self.pause()
