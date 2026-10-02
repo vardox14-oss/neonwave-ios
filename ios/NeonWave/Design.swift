@@ -160,7 +160,83 @@ struct IconButton: View {
     let label: String
     var action: () -> Void
     var body: some View {
-        Button(action: action) { Image(systemName: symbol).font(.system(size: 19, weight: .medium)).frame(width: 46, height: 46) }
-            .buttonStyle(PressStyle()).accessibilityLabel(label)
+        Button(action: {
+            Haptic.light()
+            action()
+        }) {
+            Image(systemName: symbol).font(.system(size: 19, weight: .medium)).frame(width: 46, height: 46)
+        }
+        .buttonStyle(PressStyle()).accessibilityLabel(label)
     }
 }
+
+enum Haptic {
+    static func selection() {
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+    static func light() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+    static func medium() {
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    }
+    static func heavy() {
+        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+    }
+    static func success() {
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+}
+
+struct FluidMeshBackground: View {
+    let colors: [Color]
+    let isPlaying: Bool
+    var reduceMotion: Bool = false
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1/24, paused: !isPlaying || reduceMotion)) { timeline in
+            let time = timeline.date.timeIntervalSinceReferenceDate
+            let pulse = 1.0 + 0.08 * sin(time * 0.8)
+
+            ZStack {
+                NW.background
+
+                // Top leading dynamic orb
+                Circle()
+                    .fill(colors[0].opacity(0.42))
+                    .frame(width: 340, height: 340)
+                    .blur(radius: 65)
+                    .offset(x: -60 + 55 * cos(time * 0.3), y: -130 + 45 * sin(time * 0.4))
+                    .scaleEffect(pulse)
+
+                // Top trailing accent orb
+                Circle()
+                    .fill((colors.count > 1 ? colors[1] : NW.cyan).opacity(0.35))
+                    .frame(width: 300, height: 300)
+                    .blur(radius: 70)
+                    .offset(x: 90 + 50 * sin(time * 0.35), y: -60 + 40 * cos(time * 0.25))
+                    .scaleEffect(1.9 - pulse)
+
+                // Bottom center floating orb
+                Circle()
+                    .fill(NW.violet.opacity(0.28))
+                    .frame(width: 280, height: 280)
+                    .blur(radius: 60)
+                    .offset(x: 40 * sin(time * 0.5), y: 150 + 35 * cos(time * 0.4))
+
+                // Smooth darkening overlay for readability
+                LinearGradient(
+                    colors: [
+                        Color.black.opacity(0.18),
+                        Color.black.opacity(0.35),
+                        NW.background.opacity(0.88)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+        }
+        .ignoresSafeArea()
+    }
+}
+
